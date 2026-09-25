@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>Kit Forge</title>
 <meta name="description" content="Make board game cards, pieces and boards in the browser — layered compositing, PSD/PDF import, no software install.">
 <link rel="icon" href="icon.svg">
@@ -14,18 +14,18 @@
   <div id="brand"><img src="icon.svg" width="26" height="26" alt=""><span>Kit Forge</span></div>
   <input id="kitTitle" type="text" maxlength="80" aria-label="Kit title" placeholder="My Game Kit">
   <nav id="tabs" role="tablist">
-    <button class="tab" data-tab="card" role="tab" aria-selected="true">🃏 Cards</button>
-    <button class="tab" data-tab="piece" role="tab" aria-selected="false">🔺 Pieces</button>
-    <button class="tab" data-tab="board" role="tab" aria-selected="false">🗺️ Boards</button>
-    <button class="tab" data-tab="info" role="tab" aria-selected="false">ℹ️ Kit info</button>
+    <button class="tab" data-tab="card" role="tab" aria-selected="true"><span class="ico">🃏</span><span class="lbl">Cards</span></button>
+    <button class="tab" data-tab="piece" role="tab" aria-selected="false"><span class="ico">🔺</span><span class="lbl">Pieces</span></button>
+    <button class="tab" data-tab="board" role="tab" aria-selected="false"><span class="ico">🗺️</span><span class="lbl">Boards</span></button>
+    <button class="tab" data-tab="info" role="tab" aria-selected="false"><span class="ico">ℹ️</span><span class="lbl">Kit info</span></button>
   </nav>
   <div id="topActions">
-    <button id="btnUndo" class="btn ghost icon" title="Undo (Ctrl+Z)" disabled>↺</button>
-    <button id="btnRedo" class="btn ghost icon" title="Redo (Ctrl+Shift+Z)" disabled>↻</button>
-    <button id="btnImport" class="btn ghost" title="Import a kit.json, ZIP, image, PSD or PDF">⬆ Import</button>
+    <button id="btnUndo" class="btn ghost icon" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>↺</button>
+    <button id="btnRedo" class="btn ghost icon" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled>↻</button>
+    <button id="btnImport" class="btn ghost" title="Import a kit.json, ZIP, image, PSD or PDF" aria-label="Import"><span class="ico">⬆</span><span class="lbl">Import</span></button>
     <input id="fileImport" type="file" accept=".json,.zip" hidden>
-    <button id="btnPrint" class="btn ghost" title="Print-and-play sheet of every card">🖨 Print cards</button>
-    <button id="btnExport" class="btn primary" title="Download every card/piece/board PNG + save file">⬇ Export ZIP</button>
+    <button id="btnPrint" class="btn ghost" title="Print-and-play sheet of every card" aria-label="Print cards"><span class="ico">🖨</span><span class="lbl">Print cards</span></button>
+    <button id="btnExport" class="btn primary" title="Download every card/piece/board PNG + save file" aria-label="Export ZIP"><span class="ico">⬇</span><span class="lbl">Export ZIP</span></button>
   </div>
 </header>
 
@@ -43,6 +43,7 @@
 
   <section id="editorPane">
     <div id="emptyState" hidden>
+      <div class="emptyIcon">🃏</div>
       <p>Pick something on the left, or add a new card, piece or board to get started.</p>
     </div>
     <div id="editor" hidden>
@@ -52,13 +53,14 @@
         <div id="previewWrap"><div id="previewSvg"></div></div>
         <p id="previewHint">Click a layer to select it. Drag to move, corner handle to resize, top handle to rotate.</p>
       </div>
-      <aside id="layersPanel">
-        <div class="sideHead"><span>Layers</span></div>
-        <ul id="layerList"></ul>
-        <div id="layerProps"></div>
-      </aside>
     </div>
   </section>
+
+  <aside id="layersPanel" hidden>
+    <div class="sideHead"><span>Layers</span></div>
+    <ul id="layerList"></ul>
+    <div id="layerProps"></div>
+  </aside>
 </main>
 
 <div id="infoPane" hidden>
@@ -76,6 +78,12 @@
   </div>
   <p class="hint">Everything autosaves in this browser. Use <b>Export ZIP</b> to hand in your work or move it to another computer — it includes a <code>kit.json</code> save file plus every card/piece/board image.</p>
 </div>
+
+<nav id="mobileNav" aria-label="View">
+  <button class="mnav" data-view="items" aria-current="true"><span class="ico">🗂️</span><span>Items</span></button>
+  <button class="mnav" data-view="canvas"><span class="ico">🎨</span><span>Canvas</span></button>
+  <button class="mnav" data-view="layers"><span class="ico">🧱</span><span>Layers</span></button>
+</nav>
 
 <div id="toast" role="status" aria-live="polite"></div>
 

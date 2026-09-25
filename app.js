@@ -24,7 +24,7 @@ async function loadPdfjs() {
 }
 
 let kit = emptyKit();
-let ui = { tab: 'card', selId: null, selLayer: null };
+let ui = { tab: 'card', selId: null, selLayer: null, mview: 'items' };
 let saveTimer = null, undoTimer = null, preSnap = null;
 let undoStack = [], redoStack = [];
 
@@ -91,6 +91,7 @@ function bindTopbar() {
   $('#kitTitle').addEventListener('focus', () => snap());
   $('#kitTitle').addEventListener('input', e => { kit.title = e.target.value.slice(0, 80) || 'My Game Kit'; scheduleSave(); scheduleUndoCommit(); if ($('#infoTitle')) $('#infoTitle').value = kit.title; });
   document.querySelectorAll('.tab').forEach(btn => btn.addEventListener('click', () => setTab(btn.dataset.tab)));
+  document.querySelectorAll('.mnav').forEach(btn => btn.addEventListener('click', () => setMobileView(btn.dataset.view)));
   $('#btnUndo').addEventListener('click', doUndo);
   $('#btnRedo').addEventListener('click', doRedo);
   $('#btnAddCat').addEventListener('click', () => {
@@ -105,7 +106,7 @@ function bindTopbar() {
     const item = newItem(ui.tab, catId);
     listFor(kit, ui.tab).push(item);
     ui.selId = item.id; ui.selLayer = null;
-    pushUndo(pre); scheduleSave(); renderAll();
+    pushUndo(pre); scheduleSave(); renderAll(); setMobileView('canvas');
   });
   $('#btnExport').addEventListener('click', exportZip);
   $('#btnPrint').addEventListener('click', printCards);
@@ -139,6 +140,13 @@ function setTab(tab) {
   $('#layout').hidden = tab === 'info';
   document.querySelectorAll('.tab').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === tab)));
   if (tab === 'info') renderInfo(); else renderAll();
+  if (tab !== 'info') setMobileView('items');
+}
+// Mobile shows one panel at a time (bottom nav); a no-op on desktop where CSS keeps all three visible.
+function setMobileView(v) {
+  ui.mview = v;
+  document.body.dataset.mview = v;
+  document.querySelectorAll('.mnav').forEach(b => b.setAttribute('aria-current', String(b.dataset.view === v)));
 }
 
 // ---------- categories + item list ----------
@@ -176,7 +184,7 @@ function renderItemList() {
     li.className = 'itemRow' + (it.id === ui.selId ? ' active' : '');
     li.innerHTML = `<span class="swatch" style="background:${cat?.color || '#9ca3af'}"></span><span class="itemName"></span><button class="iconbtn danger" type="button" title="Delete">✕</button>`;
     li.querySelector('.itemName').textContent = it.name || 'Untitled';
-    li.addEventListener('click', e => { if (e.target.closest('button')) return; ui.selId = it.id; ui.selLayer = null; renderAll(); });
+    li.addEventListener('click', e => { if (e.target.closest('button')) return; ui.selId = it.id; ui.selLayer = null; renderAll(); setMobileView('canvas'); });
     li.querySelector('button').addEventListener('click', () => {
       if (!confirm(`Delete "${it.name}"?`)) return;
       const pre = JSON.stringify(kit);
@@ -264,8 +272,8 @@ function renderLayers() {
     const li = document.createElement('li');
     li.className = 'layerRow' + (L.id === ui.selLayer ? ' active' : '');
     li.dataset.id = L.id;
-    li.innerHTML = `<button class="iconbtn tiny visBtn" type="button" title="${L.hidden ? 'Show' : 'Hide'}">${L.hidden ? '🚫' : '👁'}</button>
-      <button class="iconbtn tiny lockBtn" type="button" title="${L.locked ? 'Unlock' : 'Lock'}">${L.locked ? '🔒' : '🔓'}</button>
+    li.innerHTML = `<button class="iconbtn tiny visBtn${L.hidden ? ' active' : ''}" type="button" title="${L.hidden ? 'Show' : 'Hide'}">${L.hidden ? '🚫' : '👁'}</button>
+      <button class="iconbtn tiny lockBtn${L.locked ? ' active' : ''}" type="button" title="${L.locked ? 'Unlock' : 'Lock'}">${L.locked ? '🔒' : '🔓'}</button>
       <span class="layerKindIcon">${kindIcon(L)}</span>
       <span class="layerNameText"></span>
       <button class="iconbtn tiny upBtn" type="button" title="Bring forward" ${i === layers.length - 1 ? 'disabled' : ''}>▲</button>
@@ -415,6 +423,7 @@ function renderEditor() {
   const it = selected();
   $('#emptyState').hidden = !!it;
   $('#editor').hidden = !it;
+  $('#layersPanel').hidden = !it;
   if (!it) return;
   $('#docPanel').innerHTML = docPanelHTML(it);
   bindDocPanel(it);
@@ -698,9 +707,13 @@ function renderAll() { renderSidebar(); renderEditor(); }
   await load();
   bindTopbar();
   updateUndoButtons();
+  setMobileView('items');
   document.title = `${kit.title} — Kit Forge`;
   console.log(`Kit Forge v${VERSION} "${CODENAME}"`);
   renderAll();
   await store.persist();
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
+  // Skip the offline cache on localhost — it makes local editing confusing (stale files survive
+  // a reload). Real students on the deployed GitHub Pages URL still get full offline support.
+  const isLocal = ['localhost', '127.0.0.1'].includes(location.hostname);
+  if ('serviceWorker' in navigator && !isLocal) navigator.serviceWorker.register('./sw.js').catch(() => {});
 })();
