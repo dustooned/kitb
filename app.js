@@ -556,8 +556,10 @@ async function importPSD(file, it, dw, dh) {
   try { psd = readPsd(buf, { skipCompositeImageData: false, skipLayerImageData: false, skipThumbnail: true }); }
   catch { throw new Error('Could not read that PSD (unsupported feature or corrupt file).'); }
   const flat = [];
+  // ag-psd's `children` walks bottom-to-top, same as our own layers array (back to front) —
+  // verified by round-tripping a real multi-layer PSD through readPsd/writePsd and checking the
+  // result renders in the right order, no reversal needed.
   (function walk(nodes) { for (const n of nodes || []) { if (n.children) walk(n.children); else if (n.canvas) flat.push(n); } })(psd.children);
-  flat.reverse(); // ag-psd lists top-of-panel first; our array is back-to-front, so reverse to match
   const scale = Math.min(dw / psd.width, dh / psd.height);
   const offX = (dw - psd.width * scale) / 2, offY = (dh - psd.height * scale) / 2;
   let added = 0;
