@@ -1,0 +1,17 @@
+{
+  "name": "@kitforge/kit-adapter",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@kitforge/shared-types": "*"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  }
+}

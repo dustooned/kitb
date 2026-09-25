@@ -27,9 +27,12 @@ game's assets rather than one shared game's.
 - **Export ZIP** — every card/piece/board as a PNG, a print-and-play sheet (US Letter, packed
   to fit each card's real size) for the cards, and a `kit.json` save file that can be
   re-imported to keep editing or handed to a teammate.
+- **Send to Table** — export a `.kittable.json` and load it into [Kit Forge Table](table/README.md),
+  a private multiplayer playtest table (drag/flip/rotate/stack, live between players) for
+  testing a kit digitally instead of — or alongside — printing it.
 
-See [ROADMAP.md](ROADMAP.md) for what's planned next (dice, 3D model upload/placement, and a
-shared browser table for live playtesting) and why those are staged separately.
+See [ROADMAP.md](ROADMAP.md) for what's planned next (dice, 3D model upload/placement) and why
+those are staged separately.
 
 ## Running it locally
 
@@ -54,6 +57,10 @@ libraries from a CDN on first use).
 Each student's work lives only in *their own browser* (IndexedDB), so there's nothing to
 host per-student — they just export a ZIP when they're done and submit that.
 
+**Kit Forge Table** (the live playtest table) is a separate piece with its own server — see
+[table/README.md](table/README.md) for what it needs and how to deploy it. It's optional: the
+print/export path above works with zero server of any kind.
+
 ## For students
 
 1. Open the class link.
@@ -62,7 +69,8 @@ host per-student — they just export a ZIP when they're done and submit that.
    PSD), **+ Text**, or one of the shape tools. Click a layer to select it, drag to move it,
    use the corner/top handles to scale/rotate it.
 4. When you're happy, hit **Export ZIP** — that's your submission (or import it back in next
-   class to keep editing).
+   class to keep editing). Hit **Send to Table** instead (or as well) to playtest it live with
+   your group in [Kit Forge Table](table/README.md).
 
 ## Project layout
 
@@ -74,3 +82,6 @@ host per-student — they just export a ZIP when they're done and submit that.
   DOM, so it's the easiest place to add automated tests later.
 - `store.js` — the IndexedDB autosave wrapper.
 - `sw.js`, `manifest.webmanifest` — offline support (PWA "app shell" caching).
+- `table/` — Kit Forge Table, the live playtest table. A separate npm workspace with its own
+  server (see [table/README.md](table/README.md)) — the two projects share nothing at runtime
+  except the `.kittable.json` file this app exports.

@@ -1,0 +1,25 @@
+{
+  "name": "@kitforge/server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@colyseus/core": "^0.18.16",
+    "@colyseus/schema": "^5.0.34",
+    "@colyseus/ws-transport": "^0.18.3",
+    "@kitforge/kit-adapter": "*",
+    "@kitforge/shared-types": "*",
+    "express": "^5.2.1",
+    "tsx": "^4.23.15"
+  },
+  "devDependencies": {
+    "@colyseus/sdk": "^0.18.4",
+    "@types/express": "*",
+    "@types/node": "*"
+  }
+}

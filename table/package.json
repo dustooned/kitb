@@ -1,0 +1,18 @@
+{
+  "name": "kit-forge-table",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Kit Forge private browser playtest table (free-form, no rules engine)",
+  "type": "module",
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev": "concurrently -k -n server,client -c yellow,cyan \"npm:dev -w @kitforge/server\" \"npm:dev -w @kitforge/client\"",
+    "build": "npm run build -w @kitforge/client",
+    "start": "npm run start -w @kitforge/server",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.5",
+    "typescript": "^7.0.2"
+  }
+}

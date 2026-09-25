@@ -110,6 +110,7 @@ function bindTopbar() {
   });
   $('#btnExport').addEventListener('click', exportZip);
   $('#btnPrint').addEventListener('click', printCards);
+  $('#btnTable').addEventListener('click', sendToTable);
   $('#btnImport').addEventListener('click', () => $('#fileImport').click());
   $('#fileImport').addEventListener('change', e => { const f = e.target.files[0]; if (f) importFile(f); e.target.value = ''; });
   document.addEventListener('keydown', onKeydown);
@@ -678,6 +679,26 @@ async function printCards() {
   const blob = await zip.generateAsync({ type: 'blob' });
   downloadBlob(blob, `${slug(kit.title)}-print.zip`);
   toast('🖨 Print sheets downloaded!');
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(blob); });
+}
+/** Rasterizes every card/piece/board and bundles them into a .kittable.json a Kit Forge Table
+ * room can load ("Load kit…") — a separate, independent output from the print ZIP above. */
+async function sendToTable() {
+  const all = [...kit.cards, ...kit.pieces, ...kit.boards];
+  if (!all.length) return toast('Nothing to send yet — add a card, piece or board first.');
+  toast('Preparing table file…');
+  const pieces = [];
+  for (const it of all) {
+    const { w, h } = docSize(it);
+    const dataUrl = await blobToDataUrl(await toPNG(itemSVG(it, 'x'), w, h, 1));
+    pieces.push({ id: it.id, name: it.name, kind: it.kind, frontImage: dataUrl, w: it.size.w, h: it.size.h, count: it.count });
+  }
+  const payload = { format: 'kit-table', version: 1, kitTitle: kit.title, pieces };
+  downloadBlob(new Blob([JSON.stringify(payload)], { type: 'application/json' }), `${slug(kit.title)}.kittable.json`);
+  toast('📤 Table file downloaded — load it in Kit Forge Table.');
 }
 
 // ---------- import (kit.json / ZIP save) ----------
