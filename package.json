@@ -1,9 +1,9 @@
 {
-  "name": "curriculum-forge",
-  "version": "0.1.0",
+  "name": "kit-forge",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Browser-based board game asset maker for classroom use — cards and alpha-channel pieces, no software install.",
+  "description": "Browser-based board game asset maker for classroom use — layered card/piece/board compositor with PSD/PDF import, no software install.",
   "scripts": {
     "dev": "node tools/serve.mjs"
   }

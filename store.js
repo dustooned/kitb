@@ -1,6 +1,6 @@
 // Tiny IndexedDB key-value store. The whole kit (cards + pieces + art) is saved here, so it
 // survives reloads and works offline on flaky classroom wifi. localStorage is too small for images.
-const DB = 'curriculum-forge', STORE = 'kv';
+const DB = 'kit-forge', STORE = 'kv';
 let dbp = null;
 function db() {
   dbp ||= new Promise((res, rej) => {

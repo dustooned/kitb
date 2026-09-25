@@ -1,11 +1,11 @@
-// SVG renderers for a card face and a piece/token, plus PNG rasterization. Art always comes in
-// as a data: URL asset (see store.js), so the SVG never needs network access and rasterizes
-// cleanly on a <canvas> without tainting it.
-export const CARD_W = 500, CARD_H = 700;
-export const CARD_ART = { x: 24, y: 116, w: 452, h: 380 };
-export const PIECE_SIZE = 320;
+// Generic layer renderer shared by cards/pieces/boards, plus PNG rasterization. Every layer
+// (image/text/shape) uses the same transform recipe — translate to its center, rotate, scale —
+// so drag/rotate/scale handles work identically no matter what kind of layer is selected.
+import { PPI } from './model.js';
 
 export const esc = s => String(s ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
+export const docSize = item => ({ w: Math.round(item.size.w * PPI), h: Math.round(item.size.h * PPI) });
+const fam = f => `'${String(f || 'Arial').replace(/[^\w -]/g, '')}', Arial, sans-serif`;
 
 function wrap(s, count) {
   const lines = [''];
@@ -16,84 +16,93 @@ function wrap(s, count) {
   }
   return lines;
 }
-function fit(s, base, count, maxLines, min) {
-  for (let size = base; size >= min; size--) {
-    const lines = wrap(s, Math.floor(count * base / size));
-    if (lines.length <= maxLines) return { size, lines };
-  }
-  return { size: min, lines: wrap(s, Math.floor(count * base / min)).slice(0, maxLines) };
-}
 
-function artMarkup(art, clipId, x, y, w, h) {
-  if (!art?.asset) {
-    return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="#e5e7eb"/>
-      <text x="${x + w / 2}" y="${y + h / 2}" text-anchor="middle" dominant-baseline="middle" font-family="Arial" font-size="16" fill="#9ca3af">no art yet</text>`;
-  }
-  const cx = x + w / 2 + (art.x || 0), cy = y + h / 2 + (art.y || 0), s = art.scale || 1, rot = art.rot || 0;
-  // Art is drawn oversized (2x the window) and centered/panned/scaled/rotated, then clipped to the window —
-  // this way "fill and pan" never leaves a gap at the edges when a student rotates or zooms.
-  const iw = w * 2 * s, ih = h * 2 * s;
-  return `<defs><clipPath id="${clipId}"><rect x="${x}" y="${y}" width="${w}" height="${h}"/></clipPath></defs>
-    <g clip-path="url(#${clipId})">
-      <image href="${esc(art.asset)}" x="${(cx - iw / 2).toFixed(1)}" y="${(cy - ih / 2).toFixed(1)}" width="${iw.toFixed(1)}" height="${ih.toFixed(1)}"
-        transform="rotate(${rot.toFixed(1)} ${cx.toFixed(1)} ${cy.toFixed(1)})" preserveAspectRatio="xMidYMid slice"/>
-    </g>`;
-}
-
-/** ctx: { project } — project is the Kit, used to look up the card's category color/name. */
-export function cardSVG(c, project, uid = 'c') {
-  const cat = project?.categories?.find(x => x.id === c.category);
-  const color = cat?.color || '#4b5563';
-  const name = fit(c.name || 'Untitled', 30, 20, 2, 16);
-  const body = fit(c.text || '', 20, 40, 6, 12);
-  const stats = (c.stats || []).slice(0, 4);
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${CARD_W}" height="${CARD_H}" viewBox="0 0 ${CARD_W} ${CARD_H}">
-    <rect width="${CARD_W}" height="${CARD_H}" rx="18" fill="#171724"/>
-    <rect x="10" y="10" width="${CARD_W - 20}" height="${CARD_H - 20}" rx="12" fill="#fff9eb"/>
-    <rect x="24" y="24" width="${CARD_W - 48}" height="82" rx="8" fill="${esc(color)}"/>
-    ${name.lines.map((l, i) => `<text x="38" y="${58 + i * name.size * 1.08}" font-family="Arial" font-weight="800" font-size="${name.size}" fill="#171724">${esc(l)}</text>`).join('')}
-    ${c.value ? `<circle cx="${CARD_W - 56}" cy="60" r="28" fill="#171724"/><text x="${CARD_W - 56}" y="69" text-anchor="middle" font-family="Arial" font-weight="800" font-size="24" fill="#fff9eb">${esc(c.value)}</text>` : ''}
-    ${artMarkup(c.art, `art-${uid}`, CARD_ART.x, CARD_ART.y, CARD_ART.w, CARD_ART.h)}
-    <rect x="${CARD_ART.x}" y="${CARD_ART.y}" width="${CARD_ART.w}" height="${CARD_ART.h}" fill="none" stroke="#171724" stroke-width="2" opacity=".25"/>
-    ${stats.length ? stats.map((s, i) => {
-      const w = (CARD_W - 48 - (stats.length - 1) * 8) / stats.length, x = 24 + i * (w + 8), y = CARD_ART.y + CARD_ART.h + 14;
-      return `<rect x="${x}" y="${y}" width="${w}" height="46" rx="6" fill="#f3f4f6" stroke="#171724" stroke-opacity=".15"/>
-        <text x="${x + w / 2}" y="${y + 19}" text-anchor="middle" font-family="Arial" font-size="10" fill="#6b7280">${esc(s.label)}</text>
-        <text x="${x + w / 2}" y="${y + 38}" text-anchor="middle" font-family="Arial" font-weight="700" font-size="16" fill="#171724">${esc(s.value)}</text>`;
-    }).join('') : ''}
-    ${body.lines.map((l, i) => `<text x="38" y="${CARD_ART.y + CARD_ART.h + (stats.length ? 78 : 30) + i * body.size * 1.3}" font-family="Arial" font-size="${body.size}" fill="#171724">${esc(l)}</text>`).join('')}
-    <text x="38" y="${CARD_H - 22}" font-family="Arial" font-size="12" fill="#6b7280">${esc(cat?.name || '')}</text>
-  </svg>`;
-}
-
-function maskPath(shape, s) {
-  const c = s / 2;
-  if (shape === 'square') return `<rect width="${s}" height="${s}"/>`;
-  if (shape === 'rounded') return `<rect width="${s}" height="${s}" rx="${s * 0.18}"/>`;
-  if (shape === 'diamond') return `<polygon points="${c},0 ${s},${c} ${c},${s} 0,${c}"/>`;
-  if (shape === 'hex') {
-    const pts = Array.from({ length: 6 }, (_, i) => { const a = (-90 + i * 60) * Math.PI / 180; return `${(c + c * 0.98 * Math.cos(a)).toFixed(1)},${(c + c * 0.98 * Math.sin(a)).toFixed(1)}`; });
+// ---------- shape paths, centered on (0,0), sized w×h ----------
+function shapePath(shape, w, h, radius = 0) {
+  const hw = w / 2, hh = h / 2;
+  if (shape === 'ellipse') return `<ellipse cx="0" cy="0" rx="${hw}" ry="${hh}"/>`;
+  if (shape === 'triangle') return `<polygon points="0,${-hh} ${hw},${hh} ${-hw},${hh}"/>`;
+  if (shape === 'line') return `<line x1="${-hw}" y1="0" x2="${hw}" y2="0"/>`;
+  if (shape === 'star') {
+    const n = 5, ro = Math.min(hw, hh), ri = ro * 0.46;
+    const pts = Array.from({ length: n * 2 }, (_, i) => { const r = i % 2 ? ri : ro, a = (-90 + i * 180 / n) * Math.PI / 180; return `${(r * Math.cos(a)).toFixed(1)},${(r * Math.sin(a)).toFixed(1)}`; });
     return `<polygon points="${pts.join(' ')}"/>`;
   }
-  return `<circle cx="${c}" cy="${c}" r="${c}"/>`;
+  const r = Math.min(radius, hw, hh);
+  return `<rect x="${-hw}" y="${-hh}" width="${w}" height="${h}" rx="${r}"/>`;
+}
+// The item-level mask (pieces only) — same shapes, but always fills the full w×h bounding box.
+export function maskMarkup(shape, w, h) {
+  const hw = w / 2, hh = h / 2;
+  if (shape === 'circle') return `<ellipse cx="${hw}" cy="${hh}" rx="${hw}" ry="${hh}"/>`;
+  if (shape === 'square') return `<rect width="${w}" height="${h}"/>`;
+  if (shape === 'rounded') return `<rect width="${w}" height="${h}" rx="${Math.min(w, h) * 0.16}"/>`;
+  if (shape === 'diamond') return `<polygon points="${hw},0 ${w},${hh} ${hw},${h} 0,${hh}"/>`;
+  if (shape === 'hex') {
+    const pts = Array.from({ length: 6 }, (_, i) => { const a = (-90 + i * 60) * Math.PI / 180; return `${(hw + hw * 0.98 * Math.cos(a)).toFixed(1)},${(hh + hh * 0.98 * Math.sin(a)).toFixed(1)}`; });
+    return `<polygon points="${pts.join(' ')}"/>`;
+  }
+  return `<rect width="${w}" height="${h}"/>`;
 }
 
-/** ctx: { project } — used for the piece's category color (ring + label). */
-export function pieceSVG(p, project, uid = 'p') {
-  const s = PIECE_SIZE, cat = project?.categories?.find(x => x.id === p.category), color = cat?.color || '#4b5563';
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${s}" height="${s + 46}" viewBox="0 0 ${s} ${s + 46}">
-    <defs><clipPath id="mask-${uid}">${maskPath(p.shape, s)}</clipPath></defs>
-    <g clip-path="url(#mask-${uid})">
-      <rect width="${s}" height="${s}" fill="#e5e7eb"/>
-      ${artMarkup(p.art, `pxclip-${uid}`, 0, 0, s, s)}
-    </g>
-    <g fill="none" stroke="${esc(color)}" stroke-width="8">${maskPath(p.shape, s)}</g>
-    <text x="${s / 2}" y="${s + 30}" text-anchor="middle" font-family="Arial" font-weight="700" font-size="18" fill="#171724">${esc(p.name || '')}</text>
+export const layerTransform = L => `translate(${L.x.toFixed(1)} ${L.y.toFixed(1)}) rotate(${(L.rot || 0).toFixed(1)}) scale(${L.scale.toFixed(3)})`;
+export function layerBox(L) { return { hw: L.w / 2, hh: L.h / 2 }; }
+
+function layerBody(L, uid) {
+  if (L.kind === 'image') {
+    const b = L.bright ?? 1, k = L.contrast ?? 1, s = L.sat ?? 1, fx = `fx-${uid}-${L.id}`, tuned = b !== 1 || k !== 1 || s !== 1;
+    const fn = ch => `<feFunc${ch} type="linear" slope="${(k * b).toFixed(3)}" intercept="${((0.5 - 0.5 * k) * b).toFixed(3)}"/>`;
+    const filter = tuned ? `<defs><filter id="${fx}" color-interpolation-filters="sRGB"><feColorMatrix type="saturate" values="${s}"/><feComponentTransfer>${fn('R')}${fn('G')}${fn('B')}</feComponentTransfer></filter></defs>` : '';
+    return `${filter}<image href="${esc(L.asset)}" x="${-L.w / 2}" y="${-L.h / 2}" width="${L.w}" height="${L.h}" preserveAspectRatio="xMidYMid slice"${tuned ? ` filter="url(#${fx})"` : ''}/>`;
+  }
+  if (L.kind === 'shape') {
+    const paint = `fill="${L.shape === 'line' ? 'none' : esc(L.fill)}"${L.stroke ? ` stroke="${esc(L.stroke)}" stroke-width="${L.strokeWidth}"` : (L.shape === 'line' ? ` stroke="${esc(L.fill)}" stroke-width="${Math.max(2, L.strokeWidth)}"` : '')} stroke-linejoin="round"`;
+    return `<g ${paint}>${shapePath(L.shape, L.w, L.h, L.radius)}</g>`;
+  }
+  // text
+  const count = Math.max(1, Math.floor(L.w / (L.size * 0.55)));
+  const lines = String(L.text || '').split('\n').flatMap(ln => wrap(ln, count));
+  const step = L.size * 1.22, y0 = -((lines.length - 1) * step) / 2 + L.size * 0.36;
+  const anchor = L.align === 'left' ? 'start' : L.align === 'right' ? 'end' : 'middle';
+  const tx = L.align === 'left' ? -L.w / 2 : L.align === 'right' ? L.w / 2 : 0;
+  const strokeAttr = L.stroke ? ` stroke="${esc(L.stroke)}" stroke-width="${Math.max(2, L.size / 8).toFixed(1)}" paint-order="stroke" stroke-linejoin="round"` : '';
+  return lines.map((ln, i) => `<text x="${tx.toFixed(1)}" y="${(y0 + i * step).toFixed(1)}" text-anchor="${anchor}" font-family="${fam(L.font)}" font-weight="${L.bold ? 800 : 500}" font-size="${L.size}" fill="${esc(L.color)}"${L.italic ? ' font-style="italic"' : ''}${strokeAttr}>${esc(ln)}</text>`).join('');
+}
+function layerMarkup(L, uid, ghost) {
+  if (L.hidden) return '';
+  return `<g ${ghost ? 'data-ghost' : 'data-layer'}="${L.id}" transform="${layerTransform(L)}" opacity="${ghost ? 0.28 : L.opacity}"${ghost ? ' pointer-events="none"' : ' class="layer"'}>${layerBody(L, uid)}</g>`;
+}
+
+export function handlesMarkup(L) {
+  if (!L || L.hidden) return '';
+  const { hw, hh } = layerBox(L), s = L.scale, r = (L.rot || 0) * Math.PI / 180, cos = Math.cos(r), sin = Math.sin(r);
+  const P = (lx, ly) => [L.x + lx * cos - ly * sin, L.y + lx * sin + ly * cos];
+  const corners = [[-hw * s, -hh * s], [hw * s, -hh * s], [hw * s, hh * s], [-hw * s, hh * s]].map(p => P(...p));
+  const top = P(0, -hh * s), rot = P(0, -hh * s - 40);
+  const dot = (p, kind, fill) => `<circle data-handle="${kind}" cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="26" fill="transparent"/><circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="11" fill="${fill}" stroke="#171724" stroke-width="3" pointer-events="none"/>`;
+  return `<polygon points="${corners.map(p => p.map(v => v.toFixed(1)).join(',')).join(' ')}" fill="none" stroke="#2f5bd3" stroke-width="2.5" stroke-dasharray="9 5" pointer-events="none"/>
+  <line x1="${top[0].toFixed(1)}" y1="${top[1].toFixed(1)}" x2="${rot[0].toFixed(1)}" y2="${rot[1].toFixed(1)}" stroke="#2f5bd3" stroke-width="2.5" pointer-events="none"/>
+  ${corners.map(p => dot(p, 'scale', '#ffffff')).join('')}${dot(rot, 'rotate', '#ffda52')}`;
+}
+
+/** ctx: { editing, sel } — editing draws selection handles; sel is the selected layer id. */
+export function itemSVG(item, uid = 'x', ctx = {}) {
+  const { w, h } = docSize(item), masked = item.mask && item.mask !== 'none';
+  const clipId = `mask-${uid}`;
+  const layers = item.layers || [];
+  const selL = ctx.editing && ctx.sel ? layers.find(l => l.id === ctx.sel) : null;
+  const body = `${masked ? `<g clip-path="url(#${clipId})">` : ''}
+    ${selL ? layerMarkup(selL, uid, true) : ''}
+    ${layers.map(l => layerMarkup(l, uid)).join('')}
+    ${masked ? '</g>' : ''}`;
+  const border = !ctx.editing ? '' : masked ? `<g fill="none" stroke="#171724" stroke-width="2" opacity=".18">${maskMarkup(item.mask, w, h)}</g>` : `<rect x="1" y="1" width="${w - 2}" height="${h - 2}" fill="none" stroke="#171724" stroke-width="2" opacity=".18"/>`;
+  const handles = ctx.editing ? `<g id="handles">${handlesMarkup(selL)}</g>` : '';
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+    ${masked ? `<defs><clipPath id="${clipId}">${maskMarkup(item.mask, w, h)}</clipPath></defs>` : ''}
+    ${body}${border}${handles}
   </svg>`;
 }
 
-/** Rasterize an SVG string to a PNG blob at the given pixel size. Alpha is preserved, so
- * piece exports keep their transparent background outside the shape mask. */
 export function toPNG(svg, w, h, scale = 1) {
   return new Promise((res, rej) => {
     const img = new Image();

@@ -1,7 +1,7 @@
 {
-  "name": "Curriculum Forge",
-  "short_name": "Curr. Forge",
-  "description": "Make board game cards and pieces in the browser for classroom playtesting.",
+  "name": "Kit Forge",
+  "short_name": "Kit Forge",
+  "description": "Make board game cards, pieces and boards in the browser for classroom playtesting.",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#171724",
