@@ -1,0 +1,10 @@
+{
+  "name": "curriculum-forge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Browser-based board game asset maker for classroom use — cards and alpha-channel pieces, no software install.",
+  "scripts": {
+    "dev": "node tools/serve.mjs"
+  }
+}

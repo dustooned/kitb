@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Curriculum Forge</title>
+<meta name="description" content="Make board game cards and pieces in the browser — no software install, export-ready for playtesting.">
+<link rel="icon" href="icon.svg">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header id="topbar">
+  <div id="brand"><img src="icon.svg" width="26" height="26" alt=""><span>Curriculum Forge</span></div>
+  <input id="kitTitle" type="text" maxlength="80" aria-label="Kit title" placeholder="My Game Kit">
+  <nav id="tabs" role="tablist">
+    <button class="tab" data-tab="cards" role="tab" aria-selected="true">🃏 Cards</button>
+    <button class="tab" data-tab="pieces" role="tab" aria-selected="false">🔺 Pieces</button>
+    <button class="tab" data-tab="info" role="tab" aria-selected="false">ℹ️ Kit info</button>
+  </nav>
+  <div id="topActions">
+    <button id="btnImport" class="btn ghost" title="Import a kit.json or exported ZIP">⬆ Import</button>
+    <input id="fileImport" type="file" accept=".json,.zip" hidden>
+    <button id="btnPrint" class="btn ghost" title="Print-and-play sheet of every card">🖨 Print cards</button>
+    <button id="btnExport" class="btn primary" title="Download every card/piece PNG + save file">⬇ Export ZIP</button>
+  </div>
+</header>
+
+<main id="layout">
+  <aside id="sidebar">
+    <div id="catBox">
+      <div class="sideHead"><span>Categories</span><button id="btnAddCat" class="iconbtn" title="Add category">＋</button></div>
+      <ul id="catList"></ul>
+    </div>
+    <div id="listBox">
+      <div class="sideHead"><span id="listLabel">Cards</span><button id="btnAddItem" class="iconbtn" title="Add">＋</button></div>
+      <ul id="itemList"></ul>
+    </div>
+  </aside>
+
+  <section id="editorPane">
+    <div id="emptyState" hidden>
+      <p>Pick something on the left, or add a new card/piece to get started.</p>
+    </div>
+    <div id="editor" hidden>
+      <div id="editorForm"></div>
+      <div id="previewBox">
+        <div id="previewWrap"><div id="previewSvg"></div></div>
+        <p id="previewHint">Upload art, then drag it to reposition. Scroll to zoom.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div id="infoPane" hidden>
+  <h1>Kit info</h1>
+  <label>Title <input id="infoTitle" type="text" maxlength="80"></label>
+  <label>Class / section <input id="infoClass" type="text" maxlength="80" placeholder="e.g. DMA 220"></label>
+  <label>Made by <input id="infoAuthor" type="text" maxlength="80" placeholder="Student or team name"></label>
+  <div id="warnings"></div>
+  <p class="hint">Everything autosaves in this browser. Use <b>Export ZIP</b> to hand in your work or move it to another computer — it includes a <code>kit.json</code> save file plus every card/piece image.</p>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

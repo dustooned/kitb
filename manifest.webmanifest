@@ -1,0 +1,10 @@
+{
+  "name": "Curriculum Forge",
+  "short_name": "Curr. Forge",
+  "description": "Make board game cards and pieces in the browser for classroom playtesting.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#171724",
+  "theme_color": "#171724",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
