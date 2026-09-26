@@ -19,7 +19,7 @@ export function TesterGate({ onEnter }: { onEnter: () => void }) {
   return (
     <main className="screen center">
       <form className="panel gate" onSubmit={submit}>
-        <h1 className="logo">TAFL</h1>
+        <h1 className="logo">SAGA</h1>
         <p className="kicker">PRIVATE PLAYTEST</p>
         {invite && <p className="invited">You're invited to <b>{invite}</b></p>}
         <label className="field">

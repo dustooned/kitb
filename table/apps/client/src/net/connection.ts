@@ -99,5 +99,5 @@ export async function leaveTable() {
 
 export function normalizeCode(input: string) {
   const s = input.toUpperCase().replace(/[^A-Z0-9]/g, '');
-  return `TAFL-${s.startsWith('TAFL') ? s.slice(4) : s}`;
+  return `SAGA-${s.startsWith('SAGA') ? s.slice(4) : s}`;
 }

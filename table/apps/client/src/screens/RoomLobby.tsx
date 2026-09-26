@@ -40,7 +40,7 @@ export function RoomLobby({ onSessionExpired }: { onSessionExpired: () => void }
     return (
       <main className="screen center">
         <form className="panel lobby" onSubmit={e => go('join', e)}>
-          <h1 className="logo">TAFL</h1>
+          <h1 className="logo">SAGA</h1>
           <p className="invited">You're invited to <b>{invite}</b></p>
           {nameField}
           <button className="btn primary big" disabled={busy}>{busy ? 'JOINING…' : 'JOIN THE TABLE'}</button>
@@ -54,7 +54,7 @@ export function RoomLobby({ onSessionExpired }: { onSessionExpired: () => void }
   return (
     <main className="screen center">
       <div className="panel lobby">
-        <h1 className="logo">TAFL</h1>
+        <h1 className="logo">SAGA</h1>
         <p className="muted small">Bring a kit you exported from Kit Forge ("Send to Table") and load it once you're seated.</p>
         {nameField}
         <button className="btn primary big" disabled={busy} onClick={() => go('create')}>CREATE TABLE</button>
@@ -62,7 +62,7 @@ export function RoomLobby({ onSessionExpired }: { onSessionExpired: () => void }
         <form className="join-row" onSubmit={e => go('join', e)}>
           <label className="field">
             <span>RUNE</span>
-            <input value={code} onChange={e => setCode(e.target.value.toUpperCase())} placeholder="TAFL-82K" maxLength={12} />
+            <input value={code} onChange={e => setCode(e.target.value.toUpperCase())} placeholder="SAGA-82K" maxLength={12} />
           </label>
           <button className="btn" disabled={busy || !code.trim()}>JOIN TABLE</button>
         </form>
