@@ -11,7 +11,7 @@ const client = new Client(SERVER_URL);
 
 function friendly(err: unknown) {
   const msg = (err as Error)?.message ?? String(err);
-  if (/not found|no rooms|invalid room/i.test(msg)) return 'No table with that code. Check the code, or ask the host to create one.';
+  if (/not found|no rooms|invalid room/i.test(msg)) return 'No table with that rune. Check it, or ask the host to create one.';
   if (/expired|401|auth/i.test(msg)) return 'Your session expired. Enter the password again.';
   if (/full|locked|maxClients/i.test(msg)) return msg.includes('full') ? msg : 'That table is full.';
   if (/fetch|network|ECONNREFUSED/i.test(msg)) return 'Cannot reach the table server. Is it running?';
@@ -99,5 +99,5 @@ export async function leaveTable() {
 
 export function normalizeCode(input: string) {
   const s = input.toUpperCase().replace(/[^A-Z0-9]/g, '');
-  return `KIT-${s.startsWith('KIT') ? s.slice(3) : s}`;
+  return `TAFL-${s.startsWith('TAFL') ? s.slice(4) : s}`;
 }

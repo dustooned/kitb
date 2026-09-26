@@ -1,4 +1,4 @@
-// Top left: room code (click to copy an invite link) and who's at the table.
+// Top left: the rune (click to copy an invite link) and who's in your party.
 import { SEAT_COLORS } from '@kitforge/shared-types';
 import { leaveTable } from '../net/connection.ts';
 import { copyInvite } from '../net/invite.ts';
@@ -18,6 +18,7 @@ export function RoomPanel() {
         <button className="btn small" onClick={copy} title="Copy a link that opens this table">🔗 Invite</button>
         <button className="btn small ghost" onClick={() => void leaveTable()} title="Leave the table">Leave</button>
       </div>
+      <p className="party-label">PARTY · {players.length} player{players.length === 1 ? '' : 's'}</p>
       <ul className="players">
         {players.map(p => (
           <li key={p.id} className={p.connected ? '' : 'away'}>

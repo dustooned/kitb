@@ -67,7 +67,8 @@ kbd { margin-left: auto; font: 11px var(--font); color: var(--muted); border: 1p
 .hud-panel { background: var(--panel); border: 1px solid var(--panel-border); border-radius: var(--radius); padding: 10px 12px; backdrop-filter: blur(6px); position: relative; }
 
 .room-code { background: none; border: 0; font: 800 20px/1 var(--logo-font); color: var(--accent); padding: 0; letter-spacing: 0.03em; }
-.players { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; min-width: 200px; }
+.party-label { margin: 10px 0 4px; font-size: 11px; font-weight: 800; letter-spacing: 0.08em; color: var(--muted); }
+.players { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 4px; min-width: 200px; }
 .players li { display: flex; align-items: center; gap: 6px; }
 .players li.away { opacity: 0.55; }
 .players .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }

@@ -1,13 +1,18 @@
-# Kit Forge Table
+# TAFL
+
+*Old Norse for "table[top game]" — Hnefatafl was the real Viking board game.*
 
 A private browser playtest table for kits made in [Kit Forge](../README.md) — the closest
 practical recreation of Tabletop Simulator for the web: free-form dragging, flipping,
 rotating, stacking, markers and sticky notes, synced live between players. No rules engine —
-the table only syncs state ("never say illegal move").
+the table only syncs state ("never say illegal move"). A room is joined by a shared password
+plus a short code — themed here as a **rune** (e.g. `TAFL-82K`) — and everyone at a table is
+your **party**.
 
 Built as a game-agnostic sibling of [LOL, FIGHT TIEM!'s playtest table](https://github.com/dustooned) —
 same architecture (Colyseus + React Three Fiber), generalized so any Kit Forge export works,
-not just one game's cards.
+not just one game's cards. "TAFL" is this table's own name (chosen for an LBCC Vikings-themed
+deployment) — Kit Forge itself stays a generic, unbranded tool usable by anyone.
 
 ## How it fits together
 

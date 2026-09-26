@@ -29,7 +29,7 @@ export function App() {
   if (t.room) return t.state ? <TableScreen /> : <main className="screen center"><p className="muted">Sitting down at the table…</p></main>;
   return (
     <>
-      {t.status === 'lost' && <div className="banner">Lost the connection to the table. Rejoin with the same room code and name to get your seat and pieces back.</div>}
+      {t.status === 'lost' && <div className="banner">Lost the connection to the table. Rejoin with the same rune and name to get your seat and pieces back.</div>}
       <RoomLobby onSessionExpired={() => { session.clearToken(); setAuthed(false); }} />
     </>
   );
