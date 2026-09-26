@@ -9,6 +9,7 @@ class UiState {
   menu: MenuState | null = null;
   spaceHeld = false;
   version = 0;
+  private lastOrbit = 0;
   private listeners = new Set<() => void>();
 
   subscribe = (fn: () => void) => { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; };
@@ -19,7 +20,15 @@ class UiState {
   toggle(id: string) { const s = new Set(this.selected); if (s.has(id)) s.delete(id); else s.add(id); this.selected = s; this.changed(); }
   clear() { if (this.selected.size || this.menu) { this.selected = new Set(); this.menu = null; this.changed(); } }
   hover(id: string | null) { if (this.hovered !== id) { this.hovered = id; this.changed(); } }
-  openMenu(menu: MenuState | null) { this.menu = menu; this.changed(); }
+  /** True right after a right-drag orbit — on Windows the contextmenu event fires on right-button
+   *  *release*, so a piece under the cursor would otherwise get selected and pop a menu. */
+  justOrbited() { return performance.now() - this.lastOrbit < 300; }
+  openMenu(menu: MenuState | null) {
+    if (menu && this.justOrbited()) return;
+    this.menu = menu; this.changed();
+  }
+  /** Called when a right-drag orbit ends, so its button release doesn't also open a menu. */
+  markOrbit() { this.lastOrbit = performance.now(); }
 
   /** Keyboard shortcuts act on the selection, or the hovered piece if nothing is selected.
    *  `stillThere` drops ids that have since left the table. */

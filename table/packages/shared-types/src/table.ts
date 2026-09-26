@@ -18,6 +18,17 @@ export function seatAngle(seat: number): number {
   return (360 / MAX_PLAYERS) * seat;
 }
 
+/** Quick felt colors for the table-look picker. First one is the default (LBCC teal). */
+export const FELT_PRESETS = [
+  { name: 'Viking teal', color: '#184554' },
+  { name: 'Classic green', color: '#1f6b4f' },
+  { name: 'Oak', color: '#6b4a2b' },
+  { name: 'Midnight', color: '#1a1f3a' },
+  { name: 'Slate', color: '#3a3f47' },
+  { name: 'Crimson', color: '#5a1414' },
+] as const;
+export const DEFAULT_FELT = FELT_PRESETS[0].color;
+
 export interface Point2 { x: number; z: number }
 
 /** Keeps a piece's center within the table surface, accounting for its own footprint and

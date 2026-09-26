@@ -5,6 +5,7 @@ import { Room, ServerError, type Client, type Delayed } from '@colyseus/core';
 import { MAX_PLAYERS } from '@kitforge/shared-types';
 import { verifyToken } from '../auth.ts';
 import { services } from '../services.ts';
+import { ASSET_ID } from '../storage/AssetStorage.ts';
 import { claimRoomCode, releaseRoomCode } from './roomCode.ts';
 import { cleanIds, sanitizeDefinition, sanitizeKit, KIT_LIMITS } from './sanitize.ts';
 import type { TableState } from './TableState.ts';
@@ -129,6 +130,13 @@ export class TableRoom extends Room<{ state: TableState }> {
     this.on('addNote', (pid, m) => ops.addNote(c, pid, m));
     this.on('editNote', (pid, m) => ops.editNote(c, pid, m.id, m.text));
     this.on('resetTable', pid => ops.clearTable(c, pid));
+    this.on('setTableLook', async (pid, m) => {
+      if (typeof m.image === 'string' && m.image !== '') {
+        const id = m.image.startsWith('/assets/') ? m.image.slice(8) : '';
+        if (!ASSET_ID.test(id) || !(await services().storage.get(id))) return { ok: false, notice: 'That image was not found on the server.' };
+      }
+      return ops.setTableLook(c, pid, m);
+    });
     this.on('ping', (_pid, m, client) => { client.send('pong', { t: typeof m.t === 'number' ? m.t : 0 }); });
 
     this.on('loadKit', (pid, m) => {

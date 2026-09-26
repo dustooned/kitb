@@ -14,9 +14,9 @@ export function RoomLobby({ onSessionExpired }: { onSessionExpired: () => void }
 
   async function go(action: 'create' | 'join', e?: FormEvent) {
     e?.preventDefault();
+    // Name is optional so a table is one click away; the server calls you "Player N" if blank.
     const trimmed = name.trim();
-    if (!trimmed) { setError('Pick a name first.'); return; }
-    session.setName(trimmed);
+    if (trimmed) session.setName(trimmed);
     setBusy(true);
     setError('');
     try {
@@ -31,7 +31,7 @@ export function RoomLobby({ onSessionExpired }: { onSessionExpired: () => void }
 
   const nameField = (
     <label className="field">
-      <span>YOUR NAME</span>
+      <span>YOUR NAME <small className="muted">(optional)</small></span>
       <input value={name} maxLength={24} autoFocus onChange={e => setName(e.target.value)} placeholder="What should your party call you?" />
     </label>
   );

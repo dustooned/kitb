@@ -9,6 +9,7 @@
     "dev": "concurrently -k -n server,client -c yellow,cyan \"npm:dev -w @kitforge/server\" \"npm:dev -w @kitforge/client\"",
     "build": "npm run build -w @kitforge/client",
     "start": "npm run start -w @kitforge/server",
+    "classroom": "npm run build && npm start",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "devDependencies": {

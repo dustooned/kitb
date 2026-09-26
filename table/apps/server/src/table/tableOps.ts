@@ -9,7 +9,7 @@ import {
   type NormalizedKit, type PieceDefinition, type PieceFace, type PieceKind,
 } from '@kitforge/shared-types';
 import { MarkerState, NoteState, PieceState, PlayerState, TableState } from './TableState.ts';
-import { cleanText, isFiniteNumber } from './sanitize.ts';
+import { cleanImageUrl, cleanText, isFiniteNumber } from './sanitize.ts';
 
 export interface TableContext {
   state: TableState;
@@ -460,6 +460,29 @@ export function editNote(ctx: TableContext, playerId: string, id: unknown, text:
   n.text = clean;
   n.author = nameOf(ctx, playerId);
   appendLog(ctx, `${n.author} edited a note.`);
+  return ok();
+}
+
+// ---------------------------------------------------------------- table look
+
+const HEX = /^#[0-9a-f]{6}$/i;
+
+/** Anyone can restyle the table: it's cosmetic, shared and logged. Image existence is the room's job. */
+export function setTableLook(ctx: TableContext, actorId: string, raw: { felt?: unknown; image?: unknown }): OpResult {
+  const s = ctx.state, who = nameOf(ctx, actorId);
+  let line = '';
+  if (typeof raw.felt === 'string' && HEX.test(raw.felt) && raw.felt.toLowerCase() !== s.lookFelt.toLowerCase()) {
+    s.lookFelt = raw.felt.toLowerCase();
+    line = `${who} changed the table color.`;
+  }
+  if (typeof raw.image === 'string' && raw.image !== s.lookImage) {
+    const image = raw.image === '' ? '' : cleanImageUrl(raw.image);
+    if (raw.image !== '' && !image) return fail('That image is not on this server.');
+    s.lookImage = image;
+    line = image ? `${who} put a custom image on the table.` : `${who} removed the table image.`;
+  }
+  if (!line) return fail();
+  if (s.log.at(-1) !== line) appendLog(ctx, line);
   return ok();
 }
 

@@ -22,6 +22,11 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return body as T;
 }
 
+/** Whether this server skips the password screen (TABLE_OPEN=true). False if unreachable. */
+export async function isOpenTable(): Promise<boolean> {
+  try { return !!(await request<{ open?: boolean }>('/api/health')).open; } catch { return false; }
+}
+
 export async function login(password: string) {
   const res = await request<AuthResponse>('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password }) });
   session.setToken(res.token, res.expiresAt);

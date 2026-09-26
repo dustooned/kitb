@@ -35,7 +35,7 @@ export function Tabletop() {
       <ambientLight intensity={0.95} />
       <directionalLight position={[6, 18, 8]} intensity={1.6} castShadow shadow-mapSize={[2048, 2048]}
         shadow-camera-left={-20} shadow-camera-right={20} shadow-camera-top={15} shadow-camera-bottom={-15} />
-      <TableSurface />
+      <TableSurface felt={state.lookFelt} image={state.lookImage} />
       {pieces.map((c, rank) => (
         <Piece3D
           key={c.id}

@@ -1,13 +1,14 @@
-// The table itself: a felt play surface in a raised frame, painted in code (no image to ship).
-// One fixed look for v1 — see ROADMAP.md for table themes / custom images as a later pass.
-import { useMemo } from 'react';
+// The table itself: a felt play surface in a raised frame, painted in code (no image to ship),
+// with an optional uploaded image laid over the felt. Felt color + image are shared table state.
+import { useEffect, useMemo, useState } from 'react';
 import * as THREE from 'three';
-import { TABLE_D, TABLE_W } from '@kitforge/shared-types';
+import { DEFAULT_FELT, TABLE_D, TABLE_W } from '@kitforge/shared-types';
+import { assetUrl } from '../config.ts';
+import { store } from '../net/tableStore.ts';
 
-// LBCC Vikings palette, sampled from lbcc.edu: black frame, red glow, a deep teal felt
-// (their site's own secondary accent) instead of traditional card-table green.
+// LBCC Vikings frame, sampled from lbcc.edu: black rim with their red as the glowing edge.
 const RIM = 0.4, RIM_TOP = 0.06, RIM_DEPTH = 0.45;
-const FELT = '#184554', RIM_COLOR = '#141414', EDGE_GLOW = '#da291c';
+const RIM_COLOR = '#141414', EDGE_GLOW = '#da291c';
 
 function mulberry32(seed: number) {
   return () => {
@@ -18,12 +19,12 @@ function mulberry32(seed: number) {
   };
 }
 
-function feltTexture() {
+function feltTexture(color: string) {
   const w = 1024, h = Math.round((w * TABLE_D) / TABLE_W);
   const c = document.createElement('canvas');
   c.width = w; c.height = h;
   const g = c.getContext('2d')!;
-  g.fillStyle = FELT; g.fillRect(0, 0, w, h);
+  g.fillStyle = color; g.fillRect(0, 0, w, h);
   const rand = mulberry32(7);
   const img = g.getImageData(0, 0, w, h), d = img.data;
   for (let i = 0; i < d.length; i += 4) { const n = (rand() - 0.5) * 14; d[i] += n; d[i + 1] += n; d[i + 2] += n; }
@@ -34,6 +35,30 @@ function feltTexture() {
   g.fillStyle = grad; g.fillRect(0, 0, w, h);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+const loader = new THREE.TextureLoader();
+loader.setCrossOrigin('anonymous');
+
+/** Loads the custom table image, cover-fitted to the table (crops overflow, never stretches). */
+function useTableImage(url: string) {
+  const [tex, setTex] = useState<THREE.Texture | null>(null);
+  useEffect(() => {
+    if (!url) { setTex(null); return; }
+    let live = true, loaded: THREE.Texture | null = null;
+    loader.load(assetUrl(url), t => {
+      t.colorSpace = THREE.SRGBColorSpace;
+      t.anisotropy = 8;
+      const img = t.image as { width: number; height: number };
+      const imgAspect = img.width / img.height, tableAspect = TABLE_W / TABLE_D;
+      if (imgAspect > tableAspect) t.repeat.set(tableAspect / imgAspect, 1); else t.repeat.set(1, imgAspect / tableAspect);
+      t.offset.set((1 - t.repeat.x) / 2, (1 - t.repeat.y) / 2);
+      loaded = t;
+      if (live) setTex(t); else t.dispose();
+    }, undefined, () => { if (live) store.notify('The table image could not be loaded.'); });
+    return () => { live = false; loaded?.dispose(); setTex(null); };
+  }, [url]);
   return tex;
 }
 
@@ -66,8 +91,11 @@ function Frame() {
   );
 }
 
-export function TableSurface() {
-  const surface = useMemo(feltTexture, []);
+export function TableSurface({ felt, image }: { felt: string; image: string }) {
+  const color = /^#[0-9a-f]{6}$/i.test(felt) ? felt : DEFAULT_FELT;
+  const surface = useMemo(() => feltTexture(color), [color]);
+  useEffect(() => () => surface.dispose(), [surface]);
+  const overlay = useTableImage(image);
   return (
     <group>
       <Frame />
@@ -75,6 +103,12 @@ export function TableSurface() {
         <planeGeometry args={[TABLE_W, TABLE_D]} />
         <meshStandardMaterial map={surface} roughness={0.95} />
       </mesh>
+      {overlay && (
+        <mesh rotation-x={-Math.PI / 2} position-y={0.001} receiveShadow>
+          <planeGeometry args={[TABLE_W, TABLE_D]} />
+          <meshStandardMaterial map={overlay} roughness={0.9} />
+        </mesh>
+      )}
     </group>
   );
 }

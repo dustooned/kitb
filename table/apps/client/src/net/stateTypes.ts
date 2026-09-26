@@ -65,4 +65,6 @@ export interface SyncedTable {
   log: { length: number; at(i: number): string | undefined; [Symbol.iterator](): Iterator<string> };
   markers: SyncedMap<SyncedMarker>;
   notes: SyncedMap<SyncedNote>;
+  lookFelt: string;
+  lookImage: string;
 }

@@ -1,11 +1,15 @@
 // The table: 3D pieces fill the screen, small HUD panels sit in the corners.
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { actions } from '../pieces/actions.ts';
+import { loadKitFile } from '../pieces/loadKit.ts';
 import { showRoomInAddressBar } from '../net/invite.ts';
 import { store, useTable } from '../net/tableStore.ts';
+import { CameraPanel } from '../hud/CameraPanel.tsx';
 import { ContextMenu } from '../hud/ContextMenu.tsx';
+import { EmptyTable } from '../hud/EmptyTable.tsx';
 import { Notices } from '../hud/Notices.tsx';
 import { RoomPanel } from '../hud/RoomPanel.tsx';
+import { TableLookPanel } from '../hud/TableLookPanel.tsx';
 import { Toolbar } from '../hud/Toolbar.tsx';
 import { ui } from '../table/selection.ts';
 import { Tabletop } from '../table/Tabletop.tsx';
@@ -38,28 +42,48 @@ function useTableKeys() {
   }, []);
 }
 
+/** Drop a .kittable.json anywhere on the page to load it. */
+function useKitDrop() {
+  const [over, setOver] = useState(false);
+  useEffect(() => {
+    const hasFiles = (e: DragEvent) => !!e.dataTransfer && [...e.dataTransfer.types].includes('Files');
+    const onOver = (e: DragEvent) => { if (!hasFiles(e)) return; e.preventDefault(); setOver(true); };
+    const onLeave = (e: DragEvent) => { if (!e.relatedTarget) setOver(false); };
+    const onDrop = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      setOver(false);
+      const file = e.dataTransfer?.files[0];
+      if (!file) return;
+      if (/\.json$/i.test(file.name)) void loadKitFile(file);
+      else store.notify('Drop the .kittable.json from Kit Forge’s “Send to Table” — for a table image, use 🎨 Table look.');
+    };
+    window.addEventListener('dragover', onOver);
+    window.addEventListener('dragleave', onLeave);
+    window.addEventListener('drop', onDrop);
+    return () => { window.removeEventListener('dragover', onOver); window.removeEventListener('dragleave', onLeave); window.removeEventListener('drop', onDrop); };
+  }, []);
+  return over;
+}
+
 export function TableScreen() {
   const t = useTable();
   useTableKeys();
+  const dropping = useKitDrop();
   const roomCode = t.state?.roomCode ?? '';
   useEffect(() => { if (roomCode) showRoomInAddressBar(roomCode); }, [roomCode]);
-
-  // The kit chosen before create/join (none in v1's lobby, but kept for a future pass) loads once seated.
-  useEffect(() => {
-    if (t.playerId && store.pendingKit) {
-      const { kit, definitions } = store.pendingKit;
-      store.pendingKit = null;
-      actions.loadKit(kit, definitions);
-    }
-  }, [t.playerId]);
 
   return (
     <main className="table-screen">
       <Tabletop />
       <div className="hud tl"><RoomPanel /></div>
       <div className="hud tc"><Notices /></div>
+      <div className="hud tr"><TableLookPanel /></div>
+      <div className="hud cc"><EmptyTable /></div>
+      <div className="hud bl"><CameraPanel /></div>
       <div className="hud br"><Toolbar /></div>
       <ContextMenu />
+      {dropping && <div className="drop-overlay">Drop your kit to load it onto the table</div>}
     </main>
   );
 }

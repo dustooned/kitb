@@ -69,5 +69,8 @@ export const TableState = schema({
   log: t.array('string'),
   markers: t.map(MarkerState),
   notes: t.map(NoteState),
+  /** Shared table look: felt color, plus an optional uploaded image laid over it. */
+  lookFelt: t.string().default('#184554'),
+  lookImage: t.string().default(''),
 }, 'TableState');
 export type TableState = SchemaType<typeof TableState>;

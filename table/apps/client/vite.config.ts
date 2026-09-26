@@ -6,5 +6,6 @@ export default defineConfig({
   // VITE_* settings live in the table root .env next to the server's settings.
   envDir: '../..',
   // Fixed, uncommon port so it doesn't collide with other Vite projects on the same machine.
-  server: { port: 5195, strictPort: true },
+  // host: true listens on the local network too, so other devices on the same wifi can open it.
+  server: { port: 5195, strictPort: true, host: true },
 });

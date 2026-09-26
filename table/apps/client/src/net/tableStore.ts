@@ -2,11 +2,10 @@
 // so components read it directly; this store only tells React *when* to look again.
 import { useSyncExternalStore } from 'react';
 import type { Room } from '@colyseus/sdk';
-import type { ClientMessages, NormalizedKit, PieceDefinition, PieceFace } from '@kitforge/shared-types';
+import type { ClientMessages, PieceFace } from '@kitforge/shared-types';
 import type { SyncedPiece, SyncedPlayer, SyncedTable } from './stateTypes.ts';
 
 export type ConnectionStatus = 'offline' | 'online' | 'reconnecting' | 'lost';
-export interface PickedKit { label: string; kit: NormalizedKit; definitions: PieceDefinition[] }
 
 class TableStore {
   room: Room | null = null;
@@ -15,8 +14,8 @@ class TableStore {
   notices: { id: number; text: string }[] = [];
   latencyMs = 0;
   version = 0;
-  /** Kit chosen before create/join, loaded as soon as we're seated. */
-  pendingKit: PickedKit | null = null;
+  /** Progress text while a kit file is being read/uploaded, or null when idle. */
+  kitProgress: string | null = null;
 
   private listeners = new Set<() => void>();
   private frame = 0;

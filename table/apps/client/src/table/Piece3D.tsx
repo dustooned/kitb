@@ -120,7 +120,7 @@ export const Piece3D = memo(function Piece3D(p: Piece3DProps) {
           onPointerDown={onPointerDown}
           onPointerOver={e => { e.stopPropagation(); ui.hover(p.id); document.body.style.cursor = 'grab'; }}
           onPointerOut={() => { if (ui.hovered === p.id) ui.hover(null); document.body.style.cursor = ''; }}
-          onContextMenu={e => { e.stopPropagation(); e.nativeEvent.preventDefault(); ui.select(ui.selected.has(p.id) ? [...ui.selected] : [p.id]); ui.openMenu({ x: e.clientX, y: e.clientY, id: p.id, source: 'table' }); }}
+          onContextMenu={e => { e.stopPropagation(); e.nativeEvent.preventDefault(); if (ui.justOrbited()) return; ui.select(ui.selected.has(p.id) ? [...ui.selected] : [p.id]); ui.openMenu({ x: e.clientX, y: e.clientY, id: p.id, source: 'table' }); }}
         />
       </group>
       {outlineColor && (

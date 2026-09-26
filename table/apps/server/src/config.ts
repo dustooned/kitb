@@ -12,6 +12,8 @@ if (fs.existsSync(envFile)) process.loadEnvFile(envFile);
 export interface ServerConfig {
   port: number;
   password: string;
+  /** No password screen at all — for a classroom on local wifi. Off unless TABLE_OPEN=true. */
+  open: boolean;
   sessionSecret: string;
   sessionHours: number;
   uploadDir: string;
@@ -27,12 +29,14 @@ export interface ServerConfig {
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   const password = env.TABLE_PASSWORD ?? '';
-  if (!password) {
-    throw new Error('TABLE_PASSWORD is not set. Copy .env.example to .env and choose a tester password.');
+  const open = env.TABLE_OPEN === 'true';
+  if (!password && !open) {
+    throw new Error('TABLE_PASSWORD is not set. Copy .env.example to .env and choose a password (or set TABLE_OPEN=true for a password-free classroom table).');
   }
   return {
     port: Number(env.PORT) || 2568,
     password,
+    open,
     // Random per boot unless pinned: tokens simply stop working after a server restart.
     sessionSecret: env.SESSION_SECRET || randomBytes(32).toString('hex'),
     sessionHours: Number(env.SESSION_HOURS) || 12,
