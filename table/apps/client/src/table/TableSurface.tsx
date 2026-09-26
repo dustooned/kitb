@@ -4,8 +4,10 @@ import { useMemo } from 'react';
 import * as THREE from 'three';
 import { TABLE_D, TABLE_W } from '@kitforge/shared-types';
 
+// LBCC Vikings palette, sampled from lbcc.edu: black frame, red glow, a deep teal felt
+// (their site's own secondary accent) instead of traditional card-table green.
 const RIM = 0.4, RIM_TOP = 0.06, RIM_DEPTH = 0.45;
-const FELT = '#1f6b4f', RIM_COLOR = '#3a2c1e', EDGE_GLOW = '#e0533d';
+const FELT = '#184554', RIM_COLOR = '#141414', EDGE_GLOW = '#da291c';
 
 function mulberry32(seed: number) {
   return () => {
