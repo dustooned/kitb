@@ -1,7 +1,7 @@
 import * as store from './store.js';
 import {
   emptyKit, normalizeKit, newCategory, newItem, newImageLayer, newTextLayer, newShapeLayer,
-  newFrameLayer, categoryOf, listFor, KINDS, SIZE_PRESETS, MASKS, MASK_LABELS, SHAPES, SHAPE_LABELS, FONTS,
+  newFrameLayer, cleanSvgEls, SVG_TAGS, categoryOf, listFor, KINDS, SIZE_PRESETS, MASKS, MASK_LABELS, SHAPES, SHAPE_LABELS, FONTS,
   MIN_IN, MAX_IN, newId,
 } from './model.js';
 import { itemSVG, toPNG, docSize, esc, layerBox, BLENDS, LAYER_FX, FX_COLOR } from './render.js';
@@ -255,7 +255,7 @@ function toolRowHTML() {
   const b = (attrs, icon, label, title) => `<button type="button" class="tool" ${attrs} title="${title}" aria-label="${title}">${icon}<small>${label}</small></button>`;
   return b('data-tool="move" aria-pressed="true"', I.move, 'Move', 'Move & select (V)') + b('data-tool="hand" aria-pressed="false"', I.hand, 'Pan', 'Pan the canvas (H, or hold Space)')
     + '<span class="rail-sep" aria-hidden="true"></span>'
-    + `<label class="tool" title="Add an image, PSD or PDF (I)">${I.image}<small>Image</small><input id="toolImage" type="file" accept="image/*,.psd,.pdf,.ai" hidden></label>`
+    + `<label class="tool" title="Add an image, PSD or PDF (I)">${I.image}<small>Image</small><input id="toolImage" type="file" accept="image/*,.svg,.psd,.pdf,.ai" hidden></label>`
     + b('id="toolText"', I.text, 'Text', 'Add text (T)')
     + b('id="toolFrame"', FRAME_ICO, 'Frame', 'Add a picture frame (F)')
     + SHAPES.map(s => b(`data-shape="${s}"`, shapeIco(s), s === 'rect' ? 'Box' : SHAPE_LABELS[s], `Add a ${SHAPE_LABELS[s].toLowerCase()}`)).join('');
@@ -357,7 +357,7 @@ function renderLayers() {
   if (!it) return;
   ul.dataset.layers = '1';
   ul.innerHTML = [...it.layers].reverse().map(L => {
-    const bits = [L.frame ? (L.img ? 'Frame · picture' : 'Empty frame') : L.kind === 'shape' ? SHAPE_LABELS[L.shape] : L.kind === 'image' ? 'Image' : 'Text'];
+    const bits = [L.frame ? (L.img ? 'Frame · picture' : 'Empty frame') : L.kind === 'shape' ? SHAPE_LABELS[L.shape] : L.kind === 'image' ? (L.vector ? 'Vector' : 'Image') : 'Text'];
     if (L.blend && L.blend !== 'normal') bits.push(BLENDS[L.blend]);
     if (L.opacity < 1) bits.push(Math.round(L.opacity * 100) + '%');
     return `<li class="lp-row${L.id === ui.selLayer ? ' on' : ''}${L.hidden ? ' off' : ''}" data-row="${L.id}">
@@ -862,6 +862,7 @@ async function importAnyImage(file) {
   const pre = JSON.stringify(kit);
   try {
     if (name.endsWith('.psd')) await importPSD(file, it, dw, dh);
+    else if (name.endsWith('.svg') || file.type === 'image/svg+xml') await importSVG(file, it, dw, dh);
     else if (name.endsWith('.pdf') || name.endsWith('.ai')) await importPDF(file, it, dw, dh);
     else if (selectedLayer()?.frame) { await placeInFrame(file, selectedLayer()); toast('Placed in the frame.'); }
     else await importPlainImage(file, it, dw, dh);
@@ -876,6 +877,124 @@ $('#previewWrap')?.addEventListener('drop', e => {
   const f = e.dataTransfer.files?.[0];
   if (f) importAnyImage(f);
 });
+
+// ---------- SVG / vector import ----------
+// An SVG comes in as a crisp vector picture (its own colours, sharp at any size, even on a
+// board). Right-click → Convert to shape turns its outline into a recolourable shape that can
+// also be a frame.
+const svgToDataUrl = text => 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(text)));
+const dataUrlToText = url => decodeURIComponent(escape(atob(url.split(',')[1])));
+function parseSvg(text) {
+  const doc = new DOMParser().parseFromString(text, 'image/svg+xml'), root = doc.documentElement;
+  if (root?.localName !== 'svg' || doc.querySelector('parsererror')) throw new Error("That SVG couldn't be read.");
+  // Pictures are drawn through <img>/<image>, which never runs scripts; strip them anyway so the
+  // stored file is clean.
+  for (const el of root.querySelectorAll('script, foreignObject')) el.remove();
+  for (const el of root.querySelectorAll('*')) for (const at of [...el.attributes]) if (/^on/i.test(at.name)) el.removeAttribute(at.name);
+  const vbAttr = (root.getAttribute('viewBox') || '').trim().split(/[\s,]+/).map(Number);
+  let w = parseFloat(root.getAttribute('width')), h = parseFloat(root.getAttribute('height'));
+  if (vbAttr.length === 4 && vbAttr.every(Number.isFinite) && vbAttr[2] > 0) { w ||= vbAttr[2]; h ||= vbAttr[3]; }
+  if (!root.getAttribute('viewBox') && w && h) root.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  root.setAttribute('width', w || 300); root.setAttribute('height', h || 300);
+  return { root, clean: new XMLSerializer().serializeToString(root), w: w || 300, h: h || 300 };
+}
+/** Outline geometry from an SVG, flattened with its group transforms, plus its real bounds. */
+function svgOutline(root) {
+  const els = [];
+  (function walk(node, tf) {
+    for (const el of node.children) {
+      const tag = el.localName, t = `${tf} ${el.getAttribute('transform') || ''}`.trim();
+      if (['defs', 'clipPath', 'mask', 'symbol', 'pattern', 'marker', 'style', 'title', 'desc', 'metadata'].includes(tag)) continue;
+      if (SVG_TAGS.includes(tag)) els.push({ tag, a: { ...Object.fromEntries([...el.attributes].map(a => [a.name, a.value])), transform: t } });
+      else walk(el, t);
+    }
+  })(root, '');
+  const clean = cleanSvgEls(els);
+  if (!clean.length) throw new Error('No shapes found in that SVG to turn into an outline.');
+  // Measure the real bounds by drawing it off-screen once.
+  const probe = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  probe.setAttribute('style', 'position:absolute;left:-9999px;top:0;width:10px;height:10px;overflow:visible');
+  probe.innerHTML = `<g>${clean.map(e => `<${e.tag} ${Object.entries(e.a).map(([k, v]) => `${k}="${esc(v)}"`).join(' ')}/>`).join('')}</g>`;
+  document.body.appendChild(probe);
+  let bb; try { bb = probe.firstChild.getBBox(); } finally { probe.remove(); }
+  if (!bb || !(bb.width > 0) || !(bb.height > 0)) throw new Error("That SVG's shapes have no size.");
+  return { svg: clean, vb: [bb.x, bb.y, bb.width, bb.height] };
+}
+async function importSVG(file, it, dw, dh) {
+  const { clean, w, h } = parseSvg(await file.text());
+  const box = fitBox(w, h, dw, dh);
+  const L = newImageLayer(svgToDataUrl(clean), dw / 2, dh / 2, box.w, box.h, file.name.replace(/\.svg$/i, '').slice(0, 40) || 'Vector');
+  L.vector = true;
+  it.layers.push(L); ui.selLayer = L.id;
+  toast('Vector imported — stays sharp at any size. Right-click it → Convert to shape to recolour it or use it as a frame.');
+}
+/** Vector picture → recolourable custom shape (keeps size and position). */
+function vectorToShape(L) {
+  const { root } = parseSvg(dataUrlToText(L.asset)), { svg, vb } = svgOutline(root);
+  const it = selected(), i = it.layers.indexOf(L), k = Math.min(L.w / vb[2], L.h / vb[3]);
+  const S = { ...newShapeLayer('rect', 10, 10), x: L.x, y: L.y, rot: L.rot, scale: L.scale, opacity: L.opacity, name: L.name, shape: 'custom', svg, vb, w: vb[2] * k, h: vb[3] * k, fill: '#171724' };
+  it.layers.splice(i, 1, S); ui.selLayer = S.id;
+}
+/** Image layer → frame holding that picture (same size and crop). */
+function imageToFrame(L) {
+  const it = selected(), i = it.layers.indexOf(L);
+  const probe = new Image(); probe.src = L.asset;
+  const F = { ...newShapeLayer('rect', 10, 10), x: L.x, y: L.y, rot: L.rot, scale: L.scale, opacity: L.opacity, name: L.name, w: L.w, h: L.h, radius: 0, fill: '#e8e6df',
+    frame: true, img: L.asset, imgW: probe.naturalWidth || L.w, imgH: probe.naturalHeight || L.h, imgFit: 'fill', imgScale: 1, imgX: 0, imgY: 0 };
+  it.layers.splice(i, 1, F); ui.selLayer = F.id;
+}
+
+// ---------- right-click menu ----------
+function openLayerMenu(e, L) {
+  e.preventDefault();
+  if (ui.selLayer !== L.id) { ui.selLayer = L.id; renderLayers(); renderLayerProps(); updatePreview(); }
+  const items = [];
+  if (L.kind === 'shape' && L.shape !== 'line') items.push(L.frame ? ['unframe', 'Convert back to shape'] : ['makeFrame', 'Convert to frame']);
+  if (L.kind === 'shape' && L.frame) items.push(['placeFrame', L.img ? 'Replace picture…' : 'Place picture…']);
+  if (L.kind === 'image' && L.vector) items.push(['vectorShape', 'Convert to shape (recolour / frame)']);
+  if (L.kind === 'image' && !L.vector) items.push(['imageFrame', 'Convert to frame']);
+  if (items.length) items.push(null);
+  items.push(['dup', 'Duplicate'], ['front', 'Bring forward'], ['back', 'Send backward'], ['lock', L.locked ? 'Unlock' : 'Lock'], ['hide', L.hidden ? 'Show' : 'Hide'], null, ['del', 'Delete']);
+  const m = $('#ctxMenu');
+  m.innerHTML = items.map(x => x ? `<button type="button" role="menuitem" data-cm="${x[0]}"${x[0] === 'del' ? ' class="danger"' : ''}>${x[1]}</button>` : '<hr>').join('');
+  m.hidden = false;
+  const r = m.getBoundingClientRect();
+  m.style.left = Math.min(e.clientX, innerWidth - r.width - 8) + 'px';
+  m.style.top = Math.min(e.clientY, innerHeight - r.height - 8) + 'px';
+  m.querySelector('button')?.focus();
+}
+const closeMenu = () => { $('#ctxMenu').hidden = true; };
+$('#ctxMenu').addEventListener('click', e => {
+  const b = e.target.closest('[data-cm]'); if (!b) return;
+  const L = selectedLayer(), it = selected(); closeMenu(); if (!L || !it) return;
+  const a = b.dataset.cm;
+  if (a === 'dup') return duplicateLayer();
+  if (a === 'del') { L.locked = false; return deleteSelectedLayer(); }
+  if (a === 'placeFrame') return renderLayerProps(), $('#frameFile')?.click();
+  // These reuse the properties-panel buttons, so menu and panel always do the same thing.
+  if (['makeFrame', 'unframe', 'front', 'back'].includes(a)) { renderLayerProps(); return lp.querySelector(`[data-act="${a}"]`)?.click(); }
+  const pre = JSON.stringify(kit);
+  try {
+    if (a === 'lock') L.locked = !L.locked;
+    if (a === 'hide') L.hidden = !L.hidden;
+    if (a === 'vectorShape') vectorToShape(L);
+    if (a === 'imageFrame') imageToFrame(L);
+  } catch (err) { toast(err.message || "Couldn't convert that."); return; }
+  pushUndo(pre); scheduleSave(); renderLayers(); renderLayerProps(); updatePreview();
+  if (a === 'vectorShape') toast('Now a shape: pick its colour under Fill, or Turn into a picture frame.');
+  if (a === 'imageFrame') toast('Now a frame: double-click to move the picture inside, Shift + corner to reshape.');
+});
+$('#previewSvg').addEventListener('contextmenu', e => {
+  const g = e.target.closest('[data-layer]'), L = g && selected()?.layers.find(l => l.id === g.dataset.layer);
+  if (L) openLayerMenu(e, L);
+});
+$('#layerList').addEventListener('contextmenu', e => {
+  const row = e.target.closest('[data-row]'), L = row && selected()?.layers.find(l => l.id === row.dataset.row);
+  if (L) openLayerMenu(e, L);
+});
+addEventListener('pointerdown', e => { if (!e.target.closest('#ctxMenu')) closeMenu(); });
+addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#ctxMenu').hidden) { e.stopPropagation(); closeMenu(); } }, true);
+addEventListener('blur', closeMenu);
 
 // ---------- kit info tab ----------
 function renderInfo() {

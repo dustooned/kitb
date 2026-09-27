@@ -18,8 +18,14 @@ function wrap(s, count) {
 }
 
 // ---------- shape paths, centered on (0,0), sized w×h ----------
-function shapePath(shape, w, h, radius = 0) {
+function shapePath(shape, w, h, radius = 0, L = null) {
   const hw = w / 2, hh = h / 2;
+  if (shape === 'custom' && L?.svg?.length && L.vb) {
+    // Each element carries the whole fit transform itself (no wrapper <g>), because a
+    // <clipPath> may only contain shapes — this way custom shapes work as frames too.
+    const [vx, vy, vw, vh] = L.vb, T = `translate(${-hw} ${-hh}) scale(${(w / vw).toFixed(5)} ${(h / vh).toFixed(5)}) translate(${-vx} ${-vy})`;
+    return L.svg.map(e => `<${e.tag} ${Object.entries(e.a).filter(([k]) => k !== 'transform').map(([k, v]) => `${k}="${esc(v)}"`).join(' ')} transform="${T} ${esc(e.a.transform || '')}"/>`).join('');
+  }
   if (shape === 'ellipse') return `<ellipse cx="0" cy="0" rx="${hw}" ry="${hh}"/>`;
   if (shape === 'triangle') return `<polygon points="0,${-hh} ${hw},${hh} ${-hw},${hh}"/>`;
   if (shape === 'line') return `<line x1="${-hw}" y1="0" x2="${hw}" y2="0"/>`;
@@ -62,7 +68,7 @@ function layerBody(L, uid, href, doc = {}) {
   }
   if (L.kind === 'shape') {
     const paint = `fill="${L.shape === 'line' ? 'none' : esc(L.fill)}"${L.stroke ? ` stroke="${esc(L.stroke)}" stroke-width="${L.strokeWidth}"` : (L.shape === 'line' ? ` stroke="${esc(L.fill)}" stroke-width="${Math.max(2, L.strokeWidth)}"` : '')} stroke-linejoin="round"`;
-    if (!L.frame || L.shape === 'line') return `<g ${paint}>${shapePath(L.shape, L.w, L.h, L.radius)}</g>`;
+    if (!L.frame || L.shape === 'line') return `<g ${paint}>${shapePath(L.shape, L.w, L.h, L.radius, L)}</g>`;
     return frameBody(L, uid, href, doc);
   }
   // text
@@ -91,7 +97,7 @@ function fxFilter(L, id, doc) {
 // fills or fits the frame, then can be zoomed (imgScale) and nudged (imgX / imgY, in the
 // frame's own units) without moving the frame itself.
 function frameBody(L, uid, href, doc) {
-  const path = shapePath(L.shape, L.w, L.h, L.radius), cid = `fr-${uid}-${L.id}`;
+  const path = shapePath(L.shape, L.w, L.h, L.radius, L), cid = `fr-${uid}-${L.id}`;
   const clip = `<defs><clipPath id="${cid}">${path}</clipPath></defs>`, under = `<g fill="${esc(L.fill)}">${path}</g>`;
   const outline = L.stroke ? `<g fill="none" stroke="${esc(L.stroke)}" stroke-width="${L.strokeWidth}" stroke-linejoin="round">${path}</g>` : '';
   if (!L.img) {

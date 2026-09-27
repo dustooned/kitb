@@ -10,7 +10,7 @@ export const PPI = 200; // editing px per inch (also used as the on-screen SVG v
 export const MASKS = ['none', 'circle', 'square', 'rounded', 'hex', 'diamond'];
 export const MASK_LABELS = { none: 'Rectangle', circle: 'Circle', square: 'Square', rounded: 'Rounded square', hex: 'Hexagon', diamond: 'Diamond' };
 export const SHAPES = ['rect', 'ellipse', 'triangle', 'star', 'line'];
-export const SHAPE_LABELS = { rect: 'Rectangle', ellipse: 'Ellipse', triangle: 'Triangle', star: 'Star', line: 'Line' };
+export const SHAPE_LABELS = { custom: 'Custom shape', rect: 'Rectangle', ellipse: 'Ellipse', triangle: 'Triangle', star: 'Star', line: 'Line' };
 export const FONTS = ['Arial', 'Georgia', 'Verdana', 'Trebuchet MS', 'Impact', 'Comic Sans MS', 'Courier New', 'Tahoma'];
 // Kept in step with render.js BLENDS / LAYER_FX (model.js stays import-free so Node tools can load it).
 export const BLENDS = ['normal', 'multiply', 'screen', 'overlay', 'soft-light', 'hard-light', 'darken', 'lighten', 'color-dodge', 'color-burn', 'difference', 'hue', 'color', 'luminosity'];
@@ -50,6 +50,24 @@ const hex = (v, d) => /^#[0-9a-f]{6}$/i.test(v) ? v : d;
 const str = (v, d, max = 200) => String(v ?? d).slice(0, max);
 const id = (v, p) => SAFE_ID.test(v) ? v : newId(p);
 
+// ---------- custom (imported SVG) shapes ----------
+// An imported SVG outline is kept as plain geometry only: a short list of shape elements with
+// geometry attributes. No styles, scripts, links or url() references survive, so a student's
+// SVG can never run anything, and the same list works as a fill shape AND as a frame's clip.
+export const SVG_TAGS = ['path', 'rect', 'circle', 'ellipse', 'polygon', 'polyline'];
+const SVG_ATTRS = ['d', 'x', 'y', 'width', 'height', 'rx', 'ry', 'cx', 'cy', 'r', 'points', 'transform', 'fill-rule'];
+export function cleanSvgEls(list) {
+  return (Array.isArray(list) ? list : []).slice(0, 400).filter(e => e && SVG_TAGS.includes(e.tag)).map(e => {
+    const a = {};
+    for (const k of SVG_ATTRS) {
+      const v = e.a?.[k]; if (v == null) continue;
+      const t = String(v).slice(0, 60000);
+      if (/^[\w\s.,+\-()%]*$/.test(t) && !/url|script|expression/i.test(t)) a[k] = t;
+    }
+    return { tag: e.tag, a };
+  }).filter(e => Object.keys(e.a).length);
+}
+
 // ---------- layers ----------
 function baseLayer(kind, x, y, w, h, name) {
   return { id: newId('L'), kind, name: str(name, kind, 40), x, y, w, h, scale: 1, rot: 0, opacity: 1, hidden: false, locked: false };
@@ -87,6 +105,7 @@ function cleanLayer(L) {
   if (FX.includes(L.fx) && L.fx !== 'none') Object.assign(o, { fx: L.fx, fxColor: hex(L.fxColor, ''), fxSize: clamp(num(L.fxSize, 1), 0.2, 3) });
   if (L.kind === 'image') {
     if (typeof L.asset !== 'string') return null;
+    if (L.vector && L.asset.startsWith('data:image/svg+xml')) o.vector = true;
     Object.assign(o, { asset: L.asset, bright: clamp(num(L.bright, 1), 0.2, 2), contrast: clamp(num(L.contrast, 1), 0.2, 2), sat: clamp(num(L.sat, 1), 0, 2), hue: clamp(num(L.hue, 0), -180, 180) });
     if (typeof L.orig === 'string' && L.orig.startsWith('data:image/')) Object.assign(o, { orig: L.orig, cutTol: clamp(num(L.cutTol, 40), 5, 120) });
   }
@@ -97,7 +116,10 @@ function cleanLayer(L) {
     });
   }
   if (L.kind === 'shape') {
-    Object.assign(o, { shape: SHAPES.includes(L.shape) ? L.shape : 'rect', fill: hex(L.fill, '#ffda52'), stroke: L.stroke ? hex(L.stroke, '') : '', strokeWidth: clamp(num(L.strokeWidth, 4), 0, 60), radius: clamp(num(L.radius, 16), 0, 400) });
+    const svg = L.shape === 'custom' ? cleanSvgEls(L.svg) : [];
+    const vb = Array.isArray(L.vb) && L.vb.length === 4 && L.vb.every(v => Number.isFinite(+v)) && +L.vb[2] > 0 && +L.vb[3] > 0 ? L.vb.map(Number) : null;
+    if (svg.length && vb) Object.assign(o, { svg, vb });
+    Object.assign(o, { shape: svg.length && vb ? 'custom' : SHAPES.includes(L.shape) ? L.shape : 'rect', fill: hex(L.fill, '#ffda52'), stroke: L.stroke ? hex(L.stroke, '') : '', strokeWidth: clamp(num(L.strokeWidth, 4), 0, 60), radius: clamp(num(L.radius, 16), 0, 400) });
     if (L.frame && o.shape !== 'line') {
       o.frame = true;
       if (typeof L.img === 'string' && L.img.startsWith('data:image/')) Object.assign(o, {
