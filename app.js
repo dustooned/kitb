@@ -647,6 +647,10 @@ async function exportZip() {
   for (const p of kit.pieces) { const { w, h } = docSize(p); zip.file(`pieces/${slug(p.name)}-${p.id}.png`, await toPNG(itemSVG(p, 'x'), w, h, 1.5)); }
   for (const b of kit.boards) { const { w, h } = docSize(b); zip.file(`boards/${slug(b.name)}-${b.id}.png`, await toPNG(itemSVG(b, 'x'), w, h, 1)); }
   if (kit.cards.length) await addPrintSheets(zip);
+  // Also bundled here (not just under "Send to Table"), so this ZIP works on the table too —
+  // kit.json is Kit Forge's own project file, not something the table can read.
+  const tablePayload = await buildTablePayload();
+  if (tablePayload) zip.file(`${base}.kittable.json`, JSON.stringify(tablePayload));
   const blob = await zip.generateAsync({ type: 'blob' });
   downloadBlob(blob, `${base}.zip`);
   toast('📦 ZIP downloaded!');
@@ -686,19 +690,24 @@ async function printCards() {
 function blobToDataUrl(blob) {
   return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(blob); });
 }
-/** Rasterizes every card/piece/board and bundles them into a .kittable.json a Kit Forge Table
- * room can load ("Load kit…") — a separate, independent output from the print ZIP above. */
-async function sendToTable() {
+/** Rasterizes every card/piece/board into the .kittable.json shape a Kit Forge Table room loads
+ * ("Load kit…") — separate from the print ZIP, but also bundled into it (see exportZip) so
+ * whichever file someone downloads, it works on the table. */
+async function buildTablePayload() {
   const all = [...kit.cards, ...kit.pieces, ...kit.boards];
-  if (!all.length) return toast('Nothing to send yet — add a card, piece or board first.');
-  toast('Preparing table file…');
+  if (!all.length) return null;
   const pieces = [];
   for (const it of all) {
     const { w, h } = docSize(it);
     const dataUrl = await blobToDataUrl(await toPNG(itemSVG(it, 'x'), w, h, 1));
     pieces.push({ id: it.id, name: it.name, kind: it.kind, frontImage: dataUrl, w: it.size.w, h: it.size.h, count: it.count });
   }
-  const payload = { format: 'kit-table', version: 1, kitTitle: kit.title, pieces };
+  return { format: 'kit-table', version: 1, kitTitle: kit.title, pieces };
+}
+async function sendToTable() {
+  toast('Preparing table file…');
+  const payload = await buildTablePayload();
+  if (!payload) return toast('Nothing to send yet — add a card, piece or board first.');
   downloadBlob(new Blob([JSON.stringify(payload)], { type: 'application/json' }), `${slug(kit.title)}.kittable.json`);
   toast('📤 Table file downloaded — load it in Kit Forge Table.');
 }

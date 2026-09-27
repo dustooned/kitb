@@ -47,10 +47,11 @@ ${k.className ? 'Class: ' + k.className + '\n' : ''}${k.author ? 'Made by: ' + k
 Built with Kit Forge.
 
 What's in this ZIP:
-  kit.json        Full save. Drop it back into Kit Forge to keep editing.
-  cards/*.png      One image per card face, ready to print or import elsewhere.
-  pieces/*.png     One image per piece/token, transparent background outside the shape.
-  boards/*.png     One image per board.
+  kit.json           Full save. Drop it back into Kit Forge to keep editing.
+  *.kittable.json    Load this one in Kit Forge Table ("Load kit…") to play — kit.json won't work there.
+  cards/*.png        One image per card face, ready to print or import elsewhere.
+  pieces/*.png       One image per piece/token, transparent background outside the shape.
+  boards/*.png       One image per board.
   print/sheet-*.png  Print-and-play sheets (US Letter) packing every card, sized to their real inches.
 `;
 }
