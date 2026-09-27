@@ -53,7 +53,7 @@ export const FX_COLOR = { shadow: '#000000', glow: '#ffda52', outline: '#ffffff'
 export const layerTransform = L => `translate(${L.x.toFixed(1)} ${L.y.toFixed(1)}) rotate(${(L.rot || 0).toFixed(1)}) scale(${L.scale.toFixed(3)})`;
 export function layerBox(L) { return { hw: L.w / 2, hh: L.h / 2 }; }
 
-function layerBody(L, uid, href) {
+function layerBody(L, uid, href, doc = {}) {
   if (L.kind === 'image') {
     const b = L.bright ?? 1, k = L.contrast ?? 1, s = L.sat ?? 1, hue = L.hue || 0, fx = `fx-${uid}-${L.id}`, tuned = b !== 1 || k !== 1 || s !== 1 || hue !== 0;
     const fn = ch => `<feFunc${ch} type="linear" slope="${(k * b).toFixed(3)}" intercept="${((0.5 - 0.5 * k) * b).toFixed(3)}"/>`;
@@ -62,7 +62,8 @@ function layerBody(L, uid, href) {
   }
   if (L.kind === 'shape') {
     const paint = `fill="${L.shape === 'line' ? 'none' : esc(L.fill)}"${L.stroke ? ` stroke="${esc(L.stroke)}" stroke-width="${L.strokeWidth}"` : (L.shape === 'line' ? ` stroke="${esc(L.fill)}" stroke-width="${Math.max(2, L.strokeWidth)}"` : '')} stroke-linejoin="round"`;
-    return `<g ${paint}>${shapePath(L.shape, L.w, L.h, L.radius)}</g>`;
+    if (!L.frame || L.shape === 'line') return `<g ${paint}>${shapePath(L.shape, L.w, L.h, L.radius)}</g>`;
+    return frameBody(L, uid, href, doc);
   }
   // text
   const count = Math.max(1, Math.floor(L.w / (L.size * 0.55)));
@@ -86,11 +87,29 @@ function fxFilter(L, id, doc) {
 }
 // The effect and blend mode sit on an untransformed wrapper, so a shadow falls the same way
 // however the layer is spun or scaled.
+// A frame (InDesign-style) is a shape that holds a picture clipped to its outline. The picture
+// fills or fits the frame, then can be zoomed (imgScale) and nudged (imgX / imgY, in the
+// frame's own units) without moving the frame itself.
+function frameBody(L, uid, href, doc) {
+  const path = shapePath(L.shape, L.w, L.h, L.radius), cid = `fr-${uid}-${L.id}`;
+  const clip = `<defs><clipPath id="${cid}">${path}</clipPath></defs>`, under = `<g fill="${esc(L.fill)}">${path}</g>`;
+  const outline = L.stroke ? `<g fill="none" stroke="${esc(L.stroke)}" stroke-width="${L.strokeWidth}" stroke-linejoin="round">${path}</g>` : '';
+  if (!L.img) {
+    // Empty frame: the classic layout-app cross, shown only while editing.
+    const x = doc.editing ? `<g clip-path="url(#${cid})" stroke="#8a8fa8" stroke-width="${Math.max(1, Math.min(L.w, L.h) / 160).toFixed(1)}"><line x1="${-L.w / 2}" y1="${-L.h / 2}" x2="${L.w / 2}" y2="${L.h / 2}"/><line x1="${L.w / 2}" y1="${-L.h / 2}" x2="${-L.w / 2}" y2="${L.h / 2}"/></g>` : '';
+    return clip + under + x + outline;
+  }
+  const iw = L.imgW || 100, ih = L.imgH || 100;
+  const k = (L.imgFit === 'fit' ? Math.min(L.w / iw, L.h / ih) : Math.max(L.w / iw, L.h / ih)) * (L.imgScale || 1);
+  const dw = iw * k, dh = ih * k, x = -dw / 2 + (L.imgX || 0), y = -dh / 2 + (L.imgY || 0);
+  const box = doc.frameContent === L.id ? `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${dw.toFixed(1)}" height="${dh.toFixed(1)}" fill="none" stroke="#ff3ea5" stroke-width="${Math.max(1.5, Math.min(L.w, L.h) / 120).toFixed(1)}" stroke-dasharray="8 5" pointer-events="none"/>` : '';
+  return clip + under + `<g clip-path="url(#${cid})"><image href="${esc(href ? href(L.img) : L.img)}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${dw.toFixed(1)}" height="${dh.toFixed(1)}" preserveAspectRatio="none"/></g>` + outline + box;
+}
 function layerMarkup(L, uid, ghost, href, doc) {
   if (L.hidden) return '';
   // The ghost is a second copy of the selected layer — it needs its own filter id, or both
   // copies' <filter> defs collide in the same SVG.
-  const inner = `<g ${ghost ? 'data-ghost' : 'data-layer'}="${L.id}" transform="${layerTransform(L)}" opacity="${ghost ? 0.28 : L.opacity}"${ghost ? ' pointer-events="none"' : ' class="layer"'}>${layerBody(L, ghost ? `${uid}g` : uid, href)}</g>`;
+  const inner = `<g ${ghost ? 'data-ghost' : 'data-layer'}="${L.id}" transform="${layerTransform(L)}" opacity="${ghost ? 0.28 : L.opacity}"${ghost ? ' pointer-events="none"' : ' class="layer"'}>${layerBody(L, ghost ? `${uid}g` : uid, href, doc)}</g>`;
   if (ghost) return inner;
   const fid = `lx-${uid}-${L.id}`, filter = LAYER_FX[L.fx] && L.fx !== 'none' ? fxFilter(L, fid, doc) : '';
   const blend = BLENDS[L.blend] && L.blend !== 'normal' ? ` style="mix-blend-mode:${L.blend}"` : '';
@@ -123,7 +142,7 @@ export function itemSVG(item, uid = 'x', ctx = {}) {
   const selL = ctx.editing && ctx.sel ? layers.find(l => l.id === ctx.sel) : null;
   const body = `${masked ? `<g clip-path="url(#${clipId})">` : ''}
     ${selL ? layerMarkup(selL, uid, true, ctx.href, { w, h }) : ''}
-    ${layers.map(l => layerMarkup(l, uid, false, ctx.href, { w, h })).join('')}
+    ${layers.map(l => layerMarkup(l, uid, false, ctx.href, { w, h, editing: ctx.editing, frameContent: ctx.frameContent })).join('')}
     ${masked ? '</g>' : ''}`;
   const border = !ctx.editing ? '' : masked ? `<g fill="none" stroke="#171724" stroke-width="2" opacity=".18">${maskMarkup(item.mask, w, h)}</g>` : `<rect x="1" y="1" width="${w - 2}" height="${h - 2}" fill="none" stroke="#171724" stroke-width="2" opacity=".18"/>`;
   const handles = ctx.editing ? `<g id="guides" pointer-events="none"></g><g id="handles">${handlesMarkup(selL, ctx.handleK ?? 1)}</g>` : '';

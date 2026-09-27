@@ -64,6 +64,12 @@ export function newShapeLayer(shape, docW, docH) {
   const size = Math.min(docW, docH) * 0.4;
   return { ...baseLayer('shape', docW / 2, docH / 2, size, size, SHAPE_LABELS[shape] || 'Shape'), shape, fill: '#ffda52', stroke: '', strokeWidth: 4, radius: 16 };
 }
+/** An empty InDesign-style frame: a rectangle waiting for a picture. */
+export function newFrameLayer(docW, docH) {
+  const l = newShapeLayer('rect', docW, docH);
+  Object.assign(l, { w: Math.round(docW * 0.7), h: Math.round(docH * 0.45), fill: '#e8e6df', radius: 0, frame: true, name: 'Frame' });
+  return l;
+}
 export function newBackgroundLayer(docW, docH, color = '#fff9eb') {
   const l = newShapeLayer('rect', docW, docH);
   Object.assign(l, { x: docW / 2, y: docH / 2, w: docW, h: docH, fill: color, name: 'Background' });
@@ -92,6 +98,13 @@ function cleanLayer(L) {
   }
   if (L.kind === 'shape') {
     Object.assign(o, { shape: SHAPES.includes(L.shape) ? L.shape : 'rect', fill: hex(L.fill, '#ffda52'), stroke: L.stroke ? hex(L.stroke, '') : '', strokeWidth: clamp(num(L.strokeWidth, 4), 0, 60), radius: clamp(num(L.radius, 16), 0, 400) });
+    if (L.frame && o.shape !== 'line') {
+      o.frame = true;
+      if (typeof L.img === 'string' && L.img.startsWith('data:image/')) Object.assign(o, {
+        img: L.img, imgW: clamp(num(L.imgW, 100), 1, 20000), imgH: clamp(num(L.imgH, 100), 1, 20000), imgFit: L.imgFit === 'fit' ? 'fit' : 'fill',
+        imgScale: clamp(num(L.imgScale, 1), 0.1, 10), imgX: num(L.imgX, 0), imgY: num(L.imgY, 0),
+      });
+    }
   }
   return o;
 }

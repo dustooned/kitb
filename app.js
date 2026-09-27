@@ -1,7 +1,7 @@
 import * as store from './store.js';
 import {
   emptyKit, normalizeKit, newCategory, newItem, newImageLayer, newTextLayer, newShapeLayer,
-  categoryOf, listFor, KINDS, SIZE_PRESETS, MASKS, MASK_LABELS, SHAPES, SHAPE_LABELS, FONTS,
+  newFrameLayer, categoryOf, listFor, KINDS, SIZE_PRESETS, MASKS, MASK_LABELS, SHAPES, SHAPE_LABELS, FONTS,
   MIN_IN, MAX_IN, newId,
 } from './model.js';
 import { itemSVG, toPNG, docSize, esc, layerBox, BLENDS, LAYER_FX, FX_COLOR } from './render.js';
@@ -129,11 +129,12 @@ function onKeydown(e) {
   if (e.key === ' ') { e.preventDefault(); if (!ui.space) { ui.space = true; setTool(ui.tool); } return; }
   // Paint-app single-key tools.
   if (!mod && !e.altKey) {
-    const tk = { v: () => setTool('move'), h: () => setTool('hand'), i: () => $('#toolImage')?.click(), t: addText }[e.key.toLowerCase()];
+    const tk = { f: addFrame, v: () => setTool('move'), h: () => setTool('hand'), i: () => $('#toolImage')?.click(), t: addText }[e.key.toLowerCase()];
     if (tk) { e.preventDefault(); return tk(); }
   }
   const L = selectedLayer();
   if (!L) return;
+  if (e.key === 'Escape' && ui.frameContent) { ui.frameContent = null; renderLayerProps(); updatePreview(); return; }
   if (e.key === 'Escape') { ui.selLayer = null; renderLayers(); renderLayerProps(); updatePreview(); return; }
   if (L.locked) return;
   if (mod && (e.key.toLowerCase() === 'd' || e.key.toLowerCase() === 'j')) { e.preventDefault(); duplicateLayer(); return; }
@@ -247,6 +248,7 @@ function bindDocPanel(it) {
 }
 
 // ---------- editor: tool rail + zoom pill ----------
+const FRAME_ICO = '<svg class="ico" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="1.5"/><path d="M4 4l16 16M20 4L4 20"/></svg>';
 const SHAPE_ICONS = { rect: '<rect x="4" y="6" width="16" height="12" rx="2"/>', ellipse: '<ellipse cx="12" cy="12" rx="8.5" ry="6.5"/>', triangle: '<path d="M12 4l8.5 15h-17z"/>', star: '<path d="M12 3l2.6 5.6 6 .7-4.5 4.1 1.2 6L12 16.4l-5.3 3 1.2-6-4.5-4.1 6-.7z"/>', line: '<path d="M5 19L19 5"/>' };
 const shapeIco = (s, fill = 'none') => `<svg class="ico" viewBox="0 0 24 24" width="20" height="20" fill="${fill}" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true">${SHAPE_ICONS[s] || SHAPE_ICONS.rect}</svg>`;
 function toolRowHTML() {
@@ -255,6 +257,7 @@ function toolRowHTML() {
     + '<span class="rail-sep" aria-hidden="true"></span>'
     + `<label class="tool" title="Add an image, PSD or PDF (I)">${I.image}<small>Image</small><input id="toolImage" type="file" accept="image/*,.psd,.pdf,.ai" hidden></label>`
     + b('id="toolText"', I.text, 'Text', 'Add text (T)')
+    + b('id="toolFrame"', FRAME_ICO, 'Frame', 'Add a picture frame (F)')
     + SHAPES.map(s => b(`data-shape="${s}"`, shapeIco(s), s === 'rect' ? 'Box' : SHAPE_LABELS[s], `Add a ${SHAPE_LABELS[s].toLowerCase()}`)).join('');
 }
 function addLayer(L) {
@@ -262,6 +265,18 @@ function addLayer(L) {
   const pre = JSON.stringify(kit);
   it.layers.push(L); ui.selLayer = L.id;
   pushUndo(pre); scheduleSave(); renderLayers(); renderLayerProps(); updatePreview();
+}
+function addFrame() { const it = selected(); if (it) { const { w, h } = docSize(it); addLayer(newFrameLayer(w, h)); toast('Frame added — place an image in it from the panel, or drop one onto it.'); } }
+function toggleFrameContent(L) {
+  ui.frameContent = ui.frameContent === L.id ? null : L.id;
+  renderLayerProps(); updatePreview();
+  if (ui.frameContent) toast('Moving the picture inside the frame — double-click or Esc when done.');
+}
+/** Put a picture into a frame, filling it (InDesign "Fill frame proportionally"). */
+async function placeInFrame(file, L) {
+  if (!file.type.startsWith('image/')) throw new Error('Frames take PNG, JPG or WebP pictures.');
+  const img = await fileToImage(file), dataUrl = trimAndEncode(img, false), probe = await dataUrlSize(dataUrl);
+  Object.assign(L, { frame: true, img: dataUrl, imgW: probe.w, imgH: probe.h, imgFit: 'fill', imgScale: 1, imgX: 0, imgY: 0 });
 }
 function addText() { const it = selected(); if (it) { const { w, h } = docSize(it); addLayer(newTextLayer(w, h)); } }
 function bindToolRow() {
@@ -272,6 +287,12 @@ function bindToolRow() {
     const { w, h } = docSize(it); addLayer(newShapeLayer(s.dataset.shape, w, h));
   });
   $('#toolText').addEventListener('click', addText);
+  $('#toolFrame').addEventListener('click', addFrame);
+  // Double-click a filled frame to move the picture inside it (and again to stop).
+  $('#previewSvg').addEventListener('dblclick', e => {
+    const L = selectedLayer(); if (!L?.frame || !L.img || !e.target.closest(`[data-layer="${L.id}"]`)) return;
+    toggleFrameContent(L);
+  });
   $('#toolImage').addEventListener('change', async e => {
     const f = e.target.files[0]; if (!f) return;
     await importAnyImage(f);
@@ -336,7 +357,7 @@ function renderLayers() {
   if (!it) return;
   ul.dataset.layers = '1';
   ul.innerHTML = [...it.layers].reverse().map(L => {
-    const bits = [L.kind === 'shape' ? SHAPE_LABELS[L.shape] : L.kind === 'image' ? 'Image' : 'Text'];
+    const bits = [L.frame ? (L.img ? 'Frame · picture' : 'Empty frame') : L.kind === 'shape' ? SHAPE_LABELS[L.shape] : L.kind === 'image' ? 'Image' : 'Text'];
     if (L.blend && L.blend !== 'normal') bits.push(BLENDS[L.blend]);
     if (L.opacity < 1) bits.push(Math.round(L.opacity * 100) + '%');
     return `<li class="lp-row${L.id === ui.selLayer ? ' on' : ''}${L.hidden ? ' off' : ''}" data-row="${L.id}">
@@ -386,7 +407,7 @@ $('#layerList').addEventListener('pointerdown', e => {
 
 // ---------- editor: layer properties panel ----------
 const SWATCHES = ['#ffffff', '#171724', '#fff9eb', '#e0533d', '#e0b23d', '#3dbf6b', '#3d8ee0', '#8e5de0', '#e05dbb', '#4b5563', '#ffda52', '#89e4d7'];
-const FMT = { opacity: v => Math.round(v * 100) + '%', bright: v => Math.round(v * 100) + '%', contrast: v => Math.round(v * 100) + '%', sat: v => Math.round(v * 100) + '%', hue: v => Math.round(v) + '°', fxSize: v => (+v).toFixed(1) + '×', size: v => Math.round(v), strokeWidth: v => Math.round(v), radius: v => Math.round(v), cutTol: v => Math.round(v) };
+const FMT = { imgScale: v => Math.round(v * 100) + '%', opacity: v => Math.round(v * 100) + '%', bright: v => Math.round(v * 100) + '%', contrast: v => Math.round(v * 100) + '%', sat: v => Math.round(v * 100) + '%', hue: v => Math.round(v) + '°', fxSize: v => (+v).toFixed(1) + '×', size: v => Math.round(v), strokeWidth: v => Math.round(v), radius: v => Math.round(v), cutTol: v => Math.round(v) };
 const slider = (k, label, min, max, step, v) => `<label class="sl"><span>${label}</span><input type="range" data-k="${k}" min="${min}" max="${max}" step="${step}" value="${v}"><output data-out="${k}">${(FMT[k] || String)(v)}</output></label>`;
 const swatches = (k, value) => `<div class="swatches">${SWATCHES.map(v => `<button type="button" class="sw" data-sw="${v}" data-swf="${k}" style="--c:${v}" title="${v}" aria-label="Colour ${v}" aria-pressed="${String(value).toLowerCase() === v}"></button>`).join('')}<label class="sw sw-any" title="Any colour"><input type="color" data-k="${k}" value="${esc(value || '#000000')}" aria-label="Pick any colour"></label></div>`;
 const sec = (title, body) => `<div class="psec"><div class="psec-h">${title}</div>${body}</div>`;
@@ -403,7 +424,7 @@ function styleHTML(L) {
       <span class="dk-group">${pic('data-talign="left"', I.alignL, 'Align text left', L.align === 'left')}${pic('data-talign="center"', I.alignCH, 'Centre text', L.align === 'center')}${pic('data-talign="right"', I.alignR, 'Align text right', L.align === 'right')}</span></div>
     ${slider('size', 'Size', 10, 200, 1, L.size)}${swatches('color', L.color)}
     <div class="dock-row"><label class="dk-check"><input type="checkbox" data-k="strokeOn" ${L.stroke ? 'checked' : ''}> Outline</label>${L.stroke ? `<input type="color" data-k="stroke" value="${esc(L.stroke)}" aria-label="Outline colour">` : ''}</div>`);
-  if (L.kind === 'shape') return sec('Fill &amp; stroke', `${swatches('fill', L.fill)}
+  if (L.kind === 'shape') return frameHTML(L) + sec('Fill &amp; stroke', `${swatches('fill', L.fill)}
     <div class="dock-row"><label class="dk-check"><input type="checkbox" data-k="strokeOn" ${L.stroke ? 'checked' : ''}> Stroke</label>${L.stroke ? `<input type="color" data-k="stroke" value="${esc(L.stroke)}" aria-label="Stroke colour">` : ''}</div>
     ${slider('strokeWidth', 'Stroke', 0, 30, 1, L.strokeWidth)}${L.shape === 'rect' ? slider('radius', 'Corners', 0, 150, 1, L.radius) : ''}`);
   return sec('Image', `<div class="dock-row"><button type="button" class="dk-btn accent" data-act="cutout">${I.wand}<span>${L.orig ? 'Background removed' : 'Remove background'}</span></button>${L.orig ? `<button type="button" class="dk-btn" data-act="restore">${I.restore}<span>Original</span></button>` : ''}</div>
@@ -411,6 +432,21 @@ function styleHTML(L) {
     <label class="dk-btn filebtn">${I.restore}<span>Replace image</span><input id="pReplaceFile" type="file" accept="image/*" hidden></label>`)
     + sec('Adjust', `${slider('bright', 'Brightness', 0.4, 1.8, 0.02, L.bright)}${slider('contrast', 'Contrast', 0.4, 1.8, 0.02, L.contrast)}${slider('sat', 'Saturation', 0, 2, 0.05, L.sat)}${slider('hue', 'Hue', -180, 180, 1, L.hue || 0)}
     <button type="button" class="dk-btn" data-act="resetLook">${I.restore}<span>Reset</span></button>`);
+}
+function frameHTML(L) {
+  if (L.shape === 'line') return '';
+  if (!L.frame) return sec('Frame', `<button type="button" class="dk-btn" data-act="makeFrame">${FRAME_ICO}<span>Turn into a picture frame</span></button>
+    <p class="hint small">A frame holds a picture clipped to this shape, like InDesign or Affinity's layout frames.</p>`);
+  const place = `<label class="dk-btn filebtn${L.img ? '' : ' accent'}">${I.image}<span>${L.img ? 'Replace picture' : 'Place picture'}</span><input id="frameFile" type="file" accept="image/*" hidden></label>`;
+  if (!L.img) return sec('Frame', `<div class="dock-row">${place}<button type="button" class="dk-btn" data-act="unframe">${I.restore}<span>Back to shape</span></button></div>
+    <p class="hint small">…or select the frame and drop a picture onto the canvas.</p>`);
+  const moving = ui.frameContent === L.id;
+  return sec('Frame', `<div class="seg-soft" role="group" aria-label="Fit"><button type="button" data-imgfit="fill" aria-pressed="${L.imgFit !== 'fit'}">Fill frame</button><button type="button" data-imgfit="fit" aria-pressed="${L.imgFit === 'fit'}">Fit whole picture</button></div>
+    ${slider('imgScale', 'Zoom', 0.2, 4, 0.01, L.imgScale || 1)}
+    <div class="dock-row"><button type="button" class="dk-btn${moving ? ' accent' : ''}" data-act="frameContent" aria-pressed="${moving}">${I.move}<span>${moving ? 'Done moving picture' : 'Move picture'}</span></button>
+      <button type="button" class="dk-btn" data-act="frameCenter">${I.center}<span>Center</span></button></div>
+    <div class="dock-row">${place}<button type="button" class="dk-btn" data-act="frameClear">${I.trash}<span>Empty frame</span></button><button type="button" class="dk-btn" data-act="unframe">${I.restore}<span>Back to shape</span></button></div>
+    <p class="hint small">Double-click the frame to move the picture inside it.</p>`);
 }
 function renderLayerProps() {
   const L = selectedLayer(); const box = $('#layerProps');
@@ -451,6 +487,12 @@ lp.addEventListener('input', e => {
 lp.addEventListener('change', async e => {
   const L = selectedLayer(); if (!L) return;
   if (e.target.dataset.k === 'cutTol') { L.cutTol = +e.target.value; return cutOut(L); }
+  if (e.target.id === 'frameFile') {
+    const f = e.target.files[0]; if (!f) return;
+    const pre = JSON.stringify(kit);
+    try { await placeInFrame(f, L); } catch (err) { toast(err.message || 'Could not load that image.'); return; }
+    pushUndo(pre); scheduleSave(); renderLayers(); renderLayerProps(); updatePreview(); return;
+  }
   if (e.target.id === 'pReplaceFile') {
     const f = e.target.files[0]; if (!f) return;
     const pre = JSON.stringify(kit);
@@ -465,6 +507,7 @@ lp.addEventListener('click', e => {
   if (d.act === 'dup') return duplicateLayer();
   if (d.act === 'del') return deleteSelectedLayer();
   if (d.act === 'cutout') return cutOut(L);
+  if (d.act === 'frameContent') return toggleFrameContent(L);
   const pre = JSON.stringify(kit), layers = selected().layers, i = layers.indexOf(L);
   if (d.align) alignLayer(L, d.align);
   else if (d.sw) L[d.swf] = d.sw;
@@ -472,6 +515,14 @@ lp.addEventListener('click', e => {
   else if (d.toggle) L[d.toggle] = !L[d.toggle];
   else if (d.talign) L.align = d.talign;
   else if (d.act === 'lock') L.locked = !L.locked;
+  else if (d.imgfit) Object.assign(L, { imgFit: d.imgfit, imgScale: 1, imgX: 0, imgY: 0 });
+  else if (d.act === 'frameCenter') Object.assign(L, { imgX: 0, imgY: 0 });
+  else if (d.act === 'makeFrame') L.frame = true;
+  else if (d.act === 'frameClear' || d.act === 'unframe') {
+    for (const k of ['img', 'imgW', 'imgH', 'imgFit', 'imgScale', 'imgX', 'imgY']) delete L[k];
+    if (d.act === 'unframe') delete L.frame;
+    ui.frameContent = null;
+  }
   else if (d.act === 'restore' && L.orig) { L.asset = L.orig; delete L.orig; delete L.cutTol; }
   else if (d.act === 'resetLook') Object.assign(L, { bright: 1, contrast: 1, sat: 1, hue: 0 });
   else if (d.act === 'front' && i < layers.length - 1) layers.splice(i + 1, 0, layers.splice(i, 1)[0]);
@@ -577,7 +628,7 @@ function updatePreview() {
   // Handles are sized in document units per screen pixel, so they look the same on a tiny
   // token and a 24" board, zoomed in or not.
   const handleK = view.px ? (w / Math.max(1, view.z)) / view.px : w / 420;
-  const svg = itemSVG(it, 'live', { editing: true, sel: (selL && !selL.locked) ? selL.id : null, href: liveHref, handleK });
+  const svg = itemSVG(it, 'live', { editing: true, sel: (selL && !selL.locked) ? selL.id : null, href: liveHref, handleK, frameContent: ui.frameContent });
   $('#previewSvg').innerHTML = svg;
   const el = $('#previewSvg svg');
   el.style.touchAction = 'none';
@@ -651,10 +702,17 @@ function onCanvasPointerDown(e, it, el) {
     e.preventDefault();
     snap();
     if (handle.dataset.handle === 'scale') {
-      const [sx, sy] = toDoc(e), startDist = Math.hypot(sx - L.x, sy - L.y) || 1, startScale = L.scale;
+      // Corners keep proportions; hold Shift to reshape freely (width and height separately —
+      // a frame or image then crops instead of squashing its picture).
+      const [sx, sy] = toDoc(e), startDist = Math.hypot(sx - L.x, sy - L.y) || 1, startScale = L.scale, w0 = L.w, h0 = L.h;
       trackGesture(ev => {
         const [px, py] = toDoc(ev), dist = Math.hypot(px - L.x, py - L.y);
-        L.scale = Math.max(0.05, Math.min(20, startScale * (dist / startDist)));
+        if (ev.shiftKey) {
+          const r = (L.rot || 0) * Math.PI / 180, dx = px - L.x, dy = py - L.y;
+          L.scale = startScale;
+          L.w = Math.max(4, 2 * Math.abs(dx * Math.cos(r) + dy * Math.sin(r)) / L.scale);
+          L.h = Math.max(4, 2 * Math.abs(-dx * Math.sin(r) + dy * Math.cos(r)) / L.scale);
+        } else { L.w = w0; L.h = h0; L.scale = Math.max(0.05, Math.min(20, startScale * (dist / startDist))); }
         updatePreview(); scheduleUndoCommit(); scheduleSave();
       });
     } else {
@@ -678,6 +736,15 @@ function onCanvasPointerDown(e, it, el) {
     if (L.locked) return;
     e.preventDefault();
     snap();
+    if (ui.frameContent === L.id && L.img) {
+      const [sx0, sy0] = toDoc(e), ix = L.imgX || 0, iy = L.imgY || 0, r = (L.rot || 0) * Math.PI / 180;
+      trackGesture(ev => {
+        const [px, py] = toDoc(ev), dx = px - sx0, dy = py - sy0;
+        L.imgX = ix + (dx * Math.cos(r) + dy * Math.sin(r)) / L.scale; L.imgY = iy + (-dx * Math.sin(r) + dy * Math.cos(r)) / L.scale;
+        updatePreview(); scheduleUndoCommit(); scheduleSave();
+      });
+      return;
+    }
     const [startX, startY] = toDoc(e), ox = L.x, oy = L.y;
     trackGesture(ev => {
       const [px, py] = toDoc(ev);
@@ -796,6 +863,7 @@ async function importAnyImage(file) {
   try {
     if (name.endsWith('.psd')) await importPSD(file, it, dw, dh);
     else if (name.endsWith('.pdf') || name.endsWith('.ai')) await importPDF(file, it, dw, dh);
+    else if (selectedLayer()?.frame) { await placeInFrame(file, selectedLayer()); toast('Placed in the frame.'); }
     else await importPlainImage(file, it, dw, dh);
   } catch (err) { toast(err.message || 'Could not import that file.'); return; }
   pushUndo(pre); scheduleSave();
