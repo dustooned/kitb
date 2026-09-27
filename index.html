@@ -51,9 +51,12 @@
     <div id="editor" hidden>
       <div id="docPanel"></div>
       <div id="canvasArea">
-        <div id="toolRow"></div>
-        <div id="previewWrap"><div id="previewSvg"></div></div>
-        <p id="previewHint">Click a layer to select it. Drag to move, corner handle to resize, top handle to rotate.</p>
+        <div id="canvasStage" class="workspace">
+          <div id="toolRow" class="rail glass" role="toolbar" aria-label="Tools" aria-orientation="vertical"></div>
+          <div id="previewWrap"><div id="previewSvg"></div></div>
+          <div id="zoomPill" class="zoom-pill glass" role="group" aria-label="Canvas zoom"></div>
+        </div>
+        <p id="previewHint">Click a layer to grab it: drag to move, corners resize, the yellow dot spins. <b>Ctrl + scroll</b> zooms · <b>Space + drag</b> pans · hold <b>Alt</b> to skip snapping.</p>
       </div>
     </div>
   </section>

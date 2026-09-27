@@ -1,2 +1,2 @@
-export const VERSION = '0.2.0';
-export const CODENAME = 'Compositing Table';
+export const VERSION = '0.2.5';
+export const CODENAME = 'Studio';

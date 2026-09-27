@@ -12,6 +12,9 @@ export const MASK_LABELS = { none: 'Rectangle', circle: 'Circle', square: 'Squar
 export const SHAPES = ['rect', 'ellipse', 'triangle', 'star', 'line'];
 export const SHAPE_LABELS = { rect: 'Rectangle', ellipse: 'Ellipse', triangle: 'Triangle', star: 'Star', line: 'Line' };
 export const FONTS = ['Arial', 'Georgia', 'Verdana', 'Trebuchet MS', 'Impact', 'Comic Sans MS', 'Courier New', 'Tahoma'];
+// Kept in step with render.js BLENDS / LAYER_FX (model.js stays import-free so Node tools can load it).
+export const BLENDS = ['normal', 'multiply', 'screen', 'overlay', 'soft-light', 'hard-light', 'darken', 'lighten', 'color-dodge', 'color-burn', 'difference', 'hue', 'color', 'luminosity'];
+export const FX = ['none', 'shadow', 'glow', 'outline'];
 export const DEFAULT_COLORS = ['#e0533d', '#3d8ee0', '#3dbf6b', '#e0b23d', '#8e5de0', '#e05dbb', '#4b5563'];
 
 export const KINDS = ['card', 'piece', 'board'];
@@ -74,9 +77,12 @@ function cleanLayer(L) {
     scale: clamp(num(L.scale, 1), 0.05, 20), rot: num(L.rot, 0) % 360, opacity: clamp(num(L.opacity, 1), 0, 1),
     hidden: !!L.hidden, locked: !!L.locked,
   };
+  if (BLENDS.includes(L.blend) && L.blend !== 'normal') o.blend = L.blend;
+  if (FX.includes(L.fx) && L.fx !== 'none') Object.assign(o, { fx: L.fx, fxColor: hex(L.fxColor, ''), fxSize: clamp(num(L.fxSize, 1), 0.2, 3) });
   if (L.kind === 'image') {
     if (typeof L.asset !== 'string') return null;
-    Object.assign(o, { asset: L.asset, bright: clamp(num(L.bright, 1), 0.2, 2), contrast: clamp(num(L.contrast, 1), 0.2, 2), sat: clamp(num(L.sat, 1), 0, 2) });
+    Object.assign(o, { asset: L.asset, bright: clamp(num(L.bright, 1), 0.2, 2), contrast: clamp(num(L.contrast, 1), 0.2, 2), sat: clamp(num(L.sat, 1), 0, 2), hue: clamp(num(L.hue, 0), -180, 180) });
+    if (typeof L.orig === 'string' && L.orig.startsWith('data:image/')) Object.assign(o, { orig: L.orig, cutTol: clamp(num(L.cutTol, 40), 5, 120) });
   }
   if (L.kind === 'text') {
     Object.assign(o, {

@@ -4,7 +4,8 @@ import {
   categoryOf, listFor, KINDS, SIZE_PRESETS, MASKS, MASK_LABELS, SHAPES, SHAPE_LABELS, FONTS,
   MIN_IN, MAX_IN, newId,
 } from './model.js';
-import { itemSVG, toPNG, docSize, esc } from './render.js';
+import { itemSVG, toPNG, docSize, esc, layerBox, BLENDS, LAYER_FX, FX_COLOR } from './render.js';
+import { I } from './icons.js';
 import { slug, printQueue, packPrintPages, kitWarnings, readme, PRINT_DPI, PAGE_W, PAGE_H } from './project.js';
 import { VERSION, CODENAME } from './version.js';
 
@@ -24,7 +25,7 @@ async function loadPdfjs() {
 }
 
 let kit = emptyKit();
-let ui = { tab: 'card', selId: null, selLayer: null, mview: 'items' };
+let ui = { tab: 'card', selId: null, selLayer: null, mview: 'items', tool: 'move', space: false };
 let saveTimer = null, undoTimer = null, preSnap = null;
 let undoStack = [], redoStack = [];
 
@@ -121,11 +122,23 @@ function onKeydown(e) {
   const mod = e.ctrlKey || e.metaKey;
   if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); return; }
   if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); doRedo(); return; }
-  if (typing) return;
+  if (typing || !selected()) return;
+  if (mod && (e.key === '=' || e.key === '+')) { e.preventDefault(); return zoomAt(view.z * 1.25); }
+  if (mod && e.key === '-') { e.preventDefault(); return zoomAt(view.z * 0.8); }
+  if (mod && e.key === '0') { e.preventDefault(); return zoomAt(1); }
+  if (e.key === ' ') { e.preventDefault(); if (!ui.space) { ui.space = true; setTool(ui.tool); } return; }
+  // Paint-app single-key tools.
+  if (!mod && !e.altKey) {
+    const tk = { v: () => setTool('move'), h: () => setTool('hand'), i: () => $('#toolImage')?.click(), t: addText }[e.key.toLowerCase()];
+    if (tk) { e.preventDefault(); return tk(); }
+  }
   const L = selectedLayer();
-  if (!L || L.locked) return;
-  if (mod && e.key.toLowerCase() === 'd') { e.preventDefault(); duplicateLayer(); return; }
+  if (!L) return;
+  if (e.key === 'Escape') { ui.selLayer = null; renderLayers(); renderLayerProps(); updatePreview(); return; }
+  if (L.locked) return;
+  if (mod && (e.key.toLowerCase() === 'd' || e.key.toLowerCase() === 'j')) { e.preventDefault(); duplicateLayer(); return; }
   if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSelectedLayer(); return; }
+  if (e.key === '[' || e.key === ']') { e.preventDefault(); lp.querySelector(`[data-act="${e.key === ']' ? 'front' : 'back'}"]`)?.click(); return; }
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
     e.preventDefault();
     const step = e.shiftKey ? 10 : 1;
@@ -135,6 +148,9 @@ function onKeydown(e) {
     updatePreview(); scheduleUndoCommit(); scheduleSave();
   }
 }
+const spaceUp = () => { if (ui.space) { ui.space = false; setTool(ui.tool); } };
+document.addEventListener('keyup', e => { if (e.key === ' ') spaceUp(); });
+window.addEventListener('blur', spaceUp);
 function setTab(tab) {
   ui.tab = tab; ui.selId = null; ui.selLayer = null;
   $('#infoPane').hidden = tab !== 'info';
@@ -230,186 +246,244 @@ function bindDocPanel(it) {
   $('#fCount').addEventListener('input', e => { it.count = Math.max(1, Math.min(999, +e.target.value | 0 || 1)); scheduleSave(); });
 }
 
-// ---------- editor: add-layer toolbar ----------
+// ---------- editor: tool rail + zoom pill ----------
+const SHAPE_ICONS = { rect: '<rect x="4" y="6" width="16" height="12" rx="2"/>', ellipse: '<ellipse cx="12" cy="12" rx="8.5" ry="6.5"/>', triangle: '<path d="M12 4l8.5 15h-17z"/>', star: '<path d="M12 3l2.6 5.6 6 .7-4.5 4.1 1.2 6L12 16.4l-5.3 3 1.2-6-4.5-4.1 6-.7z"/>', line: '<path d="M5 19L19 5"/>' };
+const shapeIco = (s, fill = 'none') => `<svg class="ico" viewBox="0 0 24 24" width="20" height="20" fill="${fill}" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true">${SHAPE_ICONS[s] || SHAPE_ICONS.rect}</svg>`;
 function toolRowHTML() {
-  const shapeBtn = (shape, glyph) => `<button class="btn ghost small" type="button" data-shape="${shape}" title="Add ${SHAPE_LABELS[shape]}">${glyph}</button>`;
-  return `
-  <label class="btn ghost small filebtn">🖼 Image<input id="toolImage" type="file" accept="image/*,.psd,.pdf,.ai" hidden></label>
-  <button id="toolText" class="btn ghost small" type="button">🔤 Text</button>
-  ${shapeBtn('rect', '▭')}${shapeBtn('ellipse', '◯')}${shapeBtn('triangle', '△')}${shapeBtn('star', '★')}${shapeBtn('line', '╱')}`;
+  const b = (attrs, icon, label, title) => `<button type="button" class="tool" ${attrs} title="${title}" aria-label="${title}">${icon}<small>${label}</small></button>`;
+  return b('data-tool="move" aria-pressed="true"', I.move, 'Move', 'Move & select (V)') + b('data-tool="hand" aria-pressed="false"', I.hand, 'Pan', 'Pan the canvas (H, or hold Space)')
+    + '<span class="rail-sep" aria-hidden="true"></span>'
+    + `<label class="tool" title="Add an image, PSD or PDF (I)">${I.image}<small>Image</small><input id="toolImage" type="file" accept="image/*,.psd,.pdf,.ai" hidden></label>`
+    + b('id="toolText"', I.text, 'Text', 'Add text (T)')
+    + SHAPES.map(s => b(`data-shape="${s}"`, shapeIco(s), s === 'rect' ? 'Box' : SHAPE_LABELS[s], `Add a ${SHAPE_LABELS[s].toLowerCase()}`)).join('');
 }
+function addLayer(L) {
+  const it = selected(); if (!it) return;
+  const pre = JSON.stringify(kit);
+  it.layers.push(L); ui.selLayer = L.id;
+  pushUndo(pre); scheduleSave(); renderLayers(); renderLayerProps(); updatePreview();
+}
+function addText() { const it = selected(); if (it) { const { w, h } = docSize(it); addLayer(newTextLayer(w, h)); } }
 function bindToolRow() {
-  $('#toolText').addEventListener('click', () => {
+  $('#toolRow').addEventListener('click', e => {
+    const t = e.target.closest('[data-tool]'); if (t) return setTool(t.dataset.tool);
+    const s = e.target.closest('[data-shape]'); if (!s) return;
     const it = selected(); if (!it) return;
-    const { w, h } = docSize(it);
-    const pre = JSON.stringify(kit);
-    const L = newTextLayer(w, h);
-    it.layers.push(L); ui.selLayer = L.id;
-    pushUndo(pre); scheduleSave(); renderLayers(); renderLayerProps(); updatePreview();
+    const { w, h } = docSize(it); addLayer(newShapeLayer(s.dataset.shape, w, h));
   });
-  document.querySelectorAll('#toolRow [data-shape]').forEach(btn => btn.addEventListener('click', () => {
-    const it = selected(); if (!it) return;
-    const { w, h } = docSize(it);
-    const pre = JSON.stringify(kit);
-    const L = newShapeLayer(btn.dataset.shape, w, h);
-    it.layers.push(L); ui.selLayer = L.id;
-    pushUndo(pre); scheduleSave(); renderLayers(); renderLayerProps(); updatePreview();
-  }));
+  $('#toolText').addEventListener('click', addText);
   $('#toolImage').addEventListener('change', async e => {
     const f = e.target.files[0]; if (!f) return;
     await importAnyImage(f);
     e.target.value = '';
   });
+  $('#zoomPill').innerHTML = `<button type="button" data-z="out" title="Zoom out (Ctrl −)" aria-label="Zoom out">${I.minus}</button><button type="button" id="zoomPct" data-z="fit" title="Fit (Ctrl 0)">100%</button><button type="button" data-z="in" title="Zoom in (Ctrl +)" aria-label="Zoom in">${I.plus}</button>`;
+  $('#zoomPill').addEventListener('click', e => { const z = e.target.closest('[data-z]')?.dataset.z; if (z) zoomAt(z === 'fit' ? 1 : view.z * (z === 'in' ? 1.25 : 0.8)); });
+  $('#canvasStage').addEventListener('wheel', e => {
+    const it = selected(); if (!it || e.target.closest('.rail, .zoom-pill')) return;
+    if (e.ctrlKey || e.metaKey) { e.preventDefault(); zoomAt(view.z * Math.exp(-e.deltaY * 0.0025), e.clientX, e.clientY); }
+    else if (view.z > 1) { e.preventDefault(); const k = metrics().k; view.cx += e.deltaX / k; view.cy += e.deltaY / k; applyViewBox(); }
+  }, { passive: false });
+}
+function setTool(name) {
+  ui.tool = name;
+  document.querySelectorAll('#toolRow [data-tool]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.tool === name)));
+  $('#canvasStage').classList.toggle('hand', name === 'hand' || ui.space);
+}
+
+// ---------- canvas zoom & pan ----------
+// z plus the document point at the centre of the preview. Only the preview <svg>'s viewBox
+// changes, so exports and the pointer maths (getScreenCTM) are unaffected.
+const view = { z: 1, cx: 0, cy: 0, item: null, px: 0 };
+const clampN = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+function viewBoxFor(it) {
+  const { w, h } = docSize(it);
+  if (view.item !== it.id) Object.assign(view, { z: 1, item: it.id });
+  if (view.z <= 1.001 || !Number.isFinite(view.cx + view.cy)) Object.assign(view, { z: 1, cx: w / 2, cy: h / 2 });
+  view.cx = clampN(view.cx, 0, w); view.cy = clampN(view.cy, 0, h);
+  const vw = w / view.z, vh = h / view.z;
+  return `${(view.cx - vw / 2).toFixed(2)} ${(view.cy - vh / 2).toFixed(2)} ${vw.toFixed(2)} ${vh.toFixed(2)}`;
+}
+function applyViewBox() {
+  const it = selected(), el = document.querySelector('#previewSvg svg'); if (!it || !el) return;
+  el.setAttribute('viewBox', viewBoxFor(it));
+  $('#zoomPct').textContent = Math.round(view.z * 100) + '%';
+  $('#canvasStage').classList.toggle('zoomed', view.z > 1);
+}
+function metrics() {
+  const el = document.querySelector('#previewSvg svg'), r = el.getBoundingClientRect(), { w } = docSize(selected());
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2, k: r.width / (w / view.z) };
+}
+// Zoom so the document point under (px, py) stays under the cursor.
+function zoomAt(z, px, py) {
+  if (!selected() || !document.querySelector('#previewSvg svg')) return;
+  const m = metrics(); if (!m.k) return; px ??= m.x; py ??= m.y;
+  const ax = view.cx + (px - m.x) / m.k, ay = view.cy + (py - m.y) / m.k, z0 = view.z;
+  view.z = clampN(z, 1, 12);
+  const k2 = m.k * view.z / z0;
+  view.cx = ax - (px - m.x) / k2; view.cy = ay - (py - m.y) / k2;
+  updatePreview();
 }
 
 // ---------- editor: layers list ----------
-function kindIcon(L) { return L.kind === 'image' ? '🖼' : L.kind === 'text' ? '🔤' : ({ rect: '▭', ellipse: '◯', triangle: '△', star: '★', line: '╱' })[L.shape] || '◆'; }
+function layerThumb(L) {
+  if (L.kind === 'image') return `<img class="thumb img" src="${esc(liveHref(L.asset))}" alt="">`;
+  if (L.kind === 'text') return `<span class="thumb txt" style="color:${esc(L.color)}">Aa</span>`;
+  return `<span class="thumb" style="color:${esc(L.shape === 'line' ? L.fill : L.stroke || '#1d2030')}">${shapeIco(L.shape, L.shape === 'line' ? 'none' : esc(L.fill))}</span>`;
+}
 function renderLayers() {
   const it = selected(); const ul = $('#layerList'); ul.innerHTML = '';
   if (!it) return;
-  const layers = it.layers;
-  for (let i = layers.length - 1; i >= 0; i--) {
-    const L = layers[i];
-    const li = document.createElement('li');
-    li.className = 'layerRow' + (L.id === ui.selLayer ? ' active' : '');
-    li.dataset.id = L.id;
-    li.innerHTML = `<button class="iconbtn tiny visBtn${L.hidden ? ' active' : ''}" type="button" title="${L.hidden ? 'Show' : 'Hide'}">${L.hidden ? '🚫' : '👁'}</button>
-      <button class="iconbtn tiny lockBtn${L.locked ? ' active' : ''}" type="button" title="${L.locked ? 'Unlock' : 'Lock'}">${L.locked ? '🔒' : '🔓'}</button>
-      <span class="layerKindIcon">${kindIcon(L)}</span>
-      <span class="layerNameText"></span>
-      <button class="iconbtn tiny upBtn" type="button" title="Bring forward" ${i === layers.length - 1 ? 'disabled' : ''}>▲</button>
-      <button class="iconbtn tiny downBtn" type="button" title="Send backward" ${i === 0 ? 'disabled' : ''}>▼</button>
-      <button class="iconbtn tiny danger delBtn" type="button" title="Delete">✕</button>`;
-    li.querySelector('.layerNameText').textContent = L.name;
-    li.addEventListener('click', e => { if (e.target.closest('button')) return; ui.selLayer = L.id; renderLayers(); renderLayerProps(); updatePreview(); });
-    li.querySelector('.visBtn').addEventListener('click', () => { const pre = JSON.stringify(kit); L.hidden = !L.hidden; pushUndo(pre); scheduleSave(); renderLayers(); updatePreview(); });
-    li.querySelector('.lockBtn').addEventListener('click', () => { const pre = JSON.stringify(kit); L.locked = !L.locked; pushUndo(pre); scheduleSave(); renderLayers(); renderLayerProps(); updatePreview(); });
-    li.querySelector('.upBtn').addEventListener('click', () => { const pre = JSON.stringify(kit); const idx = layers.indexOf(L); [layers[idx], layers[idx + 1]] = [layers[idx + 1], layers[idx]]; pushUndo(pre); scheduleSave(); renderLayers(); updatePreview(); });
-    li.querySelector('.downBtn').addEventListener('click', () => { const pre = JSON.stringify(kit); const idx = layers.indexOf(L); [layers[idx], layers[idx - 1]] = [layers[idx - 1], layers[idx]]; pushUndo(pre); scheduleSave(); renderLayers(); updatePreview(); });
-    li.querySelector('.delBtn').addEventListener('click', () => { const pre = JSON.stringify(kit); layers.splice(layers.indexOf(L), 1); if (ui.selLayer === L.id) ui.selLayer = null; pushUndo(pre); scheduleSave(); renderLayers(); renderLayerProps(); updatePreview(); });
-    ul.appendChild(li);
-  }
+  ul.dataset.layers = '1';
+  ul.innerHTML = [...it.layers].reverse().map(L => {
+    const bits = [L.kind === 'shape' ? SHAPE_LABELS[L.shape] : L.kind === 'image' ? 'Image' : 'Text'];
+    if (L.blend && L.blend !== 'normal') bits.push(BLENDS[L.blend]);
+    if (L.opacity < 1) bits.push(Math.round(L.opacity * 100) + '%');
+    return `<li class="lp-row${L.id === ui.selLayer ? ' on' : ''}${L.hidden ? ' off' : ''}" data-row="${L.id}">
+      <span class="grip" data-grip="${L.id}" title="Drag to restack">${I.grip}</span>${layerThumb(L)}
+      <button type="button" class="nm" data-pick="${L.id}"><span class="layerNameText">${esc(L.name)}</span><small>${bits.join(' · ')}</small></button>
+      <button type="button" class="lp-ic lock" data-lact="locked" data-id="${L.id}" title="${L.locked ? 'Unlock' : 'Lock'}" aria-label="${L.locked ? 'Unlock' : 'Lock'}" aria-pressed="${L.locked}">${L.locked ? I.lock : I.unlock}</button>
+      <button type="button" class="lp-ic" data-lact="hidden" data-id="${L.id}" title="${L.hidden ? 'Show' : 'Hide'}" aria-label="${L.hidden ? 'Show' : 'Hide'}" aria-pressed="${!L.hidden}">${L.hidden ? I.eyeOff : I.eye}</button></li>`;
+  }).join('') || '<li class="lp-empty">No layers yet — use the tools left of the canvas.</li>';
 }
 function renderLayerRowName(L) {
-  const el = document.querySelector(`#layerList li[data-id="${L.id}"] .layerNameText`);
+  const el = document.querySelector(`#layerList [data-row="${L.id}"] .layerNameText`);
   if (el) el.textContent = L.name;
 }
+$('#layerList').addEventListener('click', e => {
+  const it = selected(); if (!it) return;
+  const t = e.target.closest('[data-lact]');
+  if (t) {
+    const L = it.layers.find(l => l.id === t.dataset.id); if (!L) return;
+    const pre = JSON.stringify(kit); L[t.dataset.lact] = !L[t.dataset.lact];
+    pushUndo(pre); scheduleSave(); renderLayers(); renderLayerProps(); updatePreview(); return;
+  }
+  const row = e.target.closest('[data-row]');
+  if (row && ui.selLayer !== row.dataset.row) { ui.selLayer = row.dataset.row; renderLayers(); renderLayerProps(); updatePreview(); }
+});
+// Drag a row's grip to restack (mouse or touch). The list shows top-first, so dropping on a
+// row takes that row's place in the stack.
+$('#layerList').addEventListener('pointerdown', e => {
+  const grip = e.target.closest('[data-grip]'); if (!grip) return;
+  e.preventDefault();
+  const id = grip.dataset.grip, row = grip.closest('[data-row]'); row.classList.add('dragging');
+  let target = null;
+  const move = ev => {
+    const r = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('#layerList [data-row]');
+    document.querySelectorAll('#layerList .drop').forEach(x => x.classList.remove('drop'));
+    target = r && r !== row ? r.dataset.row : null;
+    if (target) r.classList.add('drop');
+  };
+  const up = () => {
+    window.removeEventListener('pointermove', move); row.classList.remove('dragging');
+    const ls = selected()?.layers; if (!target || !ls) return renderLayers();
+    const from = ls.findIndex(l => l.id === id), to = ls.findIndex(l => l.id === target); if (from < 0 || to < 0) return;
+    const pre = JSON.stringify(kit); ls.splice(to, 0, ls.splice(from, 1)[0]);
+    pushUndo(pre); scheduleSave(); renderLayers(); updatePreview();
+  };
+  window.addEventListener('pointermove', move); window.addEventListener('pointerup', up, { once: true });
+});
 
 // ---------- editor: layer properties panel ----------
+const SWATCHES = ['#ffffff', '#171724', '#fff9eb', '#e0533d', '#e0b23d', '#3dbf6b', '#3d8ee0', '#8e5de0', '#e05dbb', '#4b5563', '#ffda52', '#89e4d7'];
+const FMT = { opacity: v => Math.round(v * 100) + '%', bright: v => Math.round(v * 100) + '%', contrast: v => Math.round(v * 100) + '%', sat: v => Math.round(v * 100) + '%', hue: v => Math.round(v) + '°', fxSize: v => (+v).toFixed(1) + '×', size: v => Math.round(v), strokeWidth: v => Math.round(v), radius: v => Math.round(v), cutTol: v => Math.round(v) };
+const slider = (k, label, min, max, step, v) => `<label class="sl"><span>${label}</span><input type="range" data-k="${k}" min="${min}" max="${max}" step="${step}" value="${v}"><output data-out="${k}">${(FMT[k] || String)(v)}</output></label>`;
+const swatches = (k, value) => `<div class="swatches">${SWATCHES.map(v => `<button type="button" class="sw" data-sw="${v}" data-swf="${k}" style="--c:${v}" title="${v}" aria-label="Colour ${v}" aria-pressed="${String(value).toLowerCase() === v}"></button>`).join('')}<label class="sw sw-any" title="Any colour"><input type="color" data-k="${k}" value="${esc(value || '#000000')}" aria-label="Pick any colour"></label></div>`;
+const sec = (title, body) => `<div class="psec"><div class="psec-h">${title}</div>${body}</div>`;
+const pic = (attrs, icon, title, pressed) => `<button type="button" class="dk-ic" ${attrs} title="${title}" aria-label="${title}"${pressed != null ? ` aria-pressed="${pressed}"` : ''}>${icon}</button>`;
 function alignLayer(L, mode) {
-  const it = selected(); const { w: dw, h: dh } = docSize(it);
-  const hw = L.w * L.scale / 2, hh = L.h * L.scale / 2;
-  if (mode === 'left') L.x = hw; if (mode === 'centerX') L.x = dw / 2; if (mode === 'right') L.x = dw - hw;
-  if (mode === 'top') L.y = hh; if (mode === 'centerY') L.y = dh / 2; if (mode === 'bottom') L.y = dh - hh;
+  const it = selected(); const { w: dw, h: dh } = docSize(it), { ex, ey } = extents(L);
+  if (mode === 'left') L.x = ex; if (mode === 'centerX') L.x = dw / 2; if (mode === 'right') L.x = dw - ex;
+  if (mode === 'top') L.y = ey; if (mode === 'centerY') L.y = dh / 2; if (mode === 'bottom') L.y = dh - ey;
 }
-function imagePropsHTML(L) {
-  return `
-  <label>Brightness <input class="pRange" data-k="bright" type="range" min="0.4" max="1.8" step="0.02" value="${L.bright}"></label>
-  <label>Contrast <input class="pRange" data-k="contrast" type="range" min="0.4" max="1.8" step="0.02" value="${L.contrast}"></label>
-  <label>Saturation <input class="pRange" data-k="sat" type="range" min="0" max="2" step="0.05" value="${L.sat}"></label>
-  <label class="btn ghost small filebtn">🔄 Replace image<input id="pReplaceFile" type="file" accept="image/*" hidden></label>`;
-}
-function bindImageProps(L) {
-  $('#pReplaceFile').addEventListener('change', async e => {
-    const f = e.target.files[0]; if (!f) return;
-    const pre = JSON.stringify(kit);
-    try { await importPlainImage(f, selected(), 0, 0, L); } catch (err) { toast(err.message || 'Could not load that image.'); return; }
-    pushUndo(pre); scheduleSave(); updatePreview();
-    e.target.value = '';
-  });
-}
-function textPropsHTML(L) {
-  return `
-  <label>Content <textarea id="pText" maxlength="300" rows="3">${esc(L.text)}</textarea></label>
-  <div class="row2">
-    <label>Font <select id="pFont">${FONTS.map(f => `<option value="${esc(f)}" ${f === L.font ? 'selected' : ''}>${esc(f)}</option>`).join('')}</select></label>
-    <label>Size <input class="pRange" data-k="size" type="range" min="10" max="140" value="${L.size}"></label>
-  </div>
-  <div class="row2">
-    <label>Color <input id="pColor" type="color" value="${L.color}"></label>
-    <label class="chk"><input id="pStrokeOn" type="checkbox" ${L.stroke ? 'checked' : ''}> Outline <input id="pStroke" type="color" value="${L.stroke || '#000000'}" ${L.stroke ? '' : 'disabled'}></label>
-  </div>
-  <div class="toggleRow">
-    <button class="iconbtn toggle" id="pBold" aria-pressed="${L.bold}" type="button"><b>B</b></button>
-    <button class="iconbtn toggle" id="pItalic" aria-pressed="${L.italic}" type="button"><i>I</i></button>
-    <button class="iconbtn toggle" id="pAlL" aria-pressed="${L.align === 'left'}" type="button">L</button>
-    <button class="iconbtn toggle" id="pAlC" aria-pressed="${L.align === 'center'}" type="button">C</button>
-    <button class="iconbtn toggle" id="pAlR" aria-pressed="${L.align === 'right'}" type="button">R</button>
-  </div>`;
-}
-function bindTextProps(L) {
-  const ta = $('#pText');
-  ta.addEventListener('focus', () => snap());
-  ta.addEventListener('input', e => { L.text = e.target.value.slice(0, 300); updatePreview(); scheduleSave(); scheduleUndoCommit(); });
-  $('#pFont').addEventListener('change', e => { const pre = JSON.stringify(kit); L.font = e.target.value; pushUndo(pre); scheduleSave(); updatePreview(); });
-  $('#pColor').addEventListener('focus', () => snap());
-  $('#pColor').addEventListener('input', e => { L.color = e.target.value; updatePreview(); scheduleSave(); scheduleUndoCommit(); });
-  $('#pStrokeOn').addEventListener('change', e => { const pre = JSON.stringify(kit); L.stroke = e.target.checked ? $('#pStroke').value : ''; pushUndo(pre); scheduleSave(); renderLayerProps(); updatePreview(); });
-  $('#pStroke').addEventListener('focus', () => snap());
-  $('#pStroke').addEventListener('input', e => { L.stroke = e.target.value; updatePreview(); scheduleSave(); scheduleUndoCommit(); });
-  $('#pBold').addEventListener('click', () => { const pre = JSON.stringify(kit); L.bold = !L.bold; pushUndo(pre); scheduleSave(); renderLayerProps(); updatePreview(); });
-  $('#pItalic').addEventListener('click', () => { const pre = JSON.stringify(kit); L.italic = !L.italic; pushUndo(pre); scheduleSave(); renderLayerProps(); updatePreview(); });
-  const setAlign = a => { const pre = JSON.stringify(kit); L.align = a; pushUndo(pre); scheduleSave(); renderLayerProps(); updatePreview(); };
-  $('#pAlL').addEventListener('click', () => setAlign('left'));
-  $('#pAlC').addEventListener('click', () => setAlign('center'));
-  $('#pAlR').addEventListener('click', () => setAlign('right'));
-}
-function shapePropsHTML(L) {
-  return `
-  <div class="row2">
-    <label>Fill <input id="pFill" type="color" value="${L.fill}"></label>
-    <label>Stroke <input id="pStroke2" type="color" value="${L.stroke || '#000000'}"></label>
-  </div>
-  <label>Stroke width <input class="pRange" data-k="strokeWidth" type="range" min="0" max="30" value="${L.strokeWidth}"></label>
-  ${L.shape === 'rect' ? `<label>Corner radius <input class="pRange" data-k="radius" type="range" min="0" max="150" value="${L.radius}"></label>` : ''}`;
-}
-function bindShapeProps(L) {
-  $('#pFill').addEventListener('focus', () => snap());
-  $('#pFill').addEventListener('input', e => { L.fill = e.target.value; updatePreview(); scheduleSave(); scheduleUndoCommit(); });
-  $('#pStroke2').addEventListener('focus', () => snap());
-  $('#pStroke2').addEventListener('input', e => { L.stroke = e.target.value; updatePreview(); scheduleSave(); scheduleUndoCommit(); });
+function styleHTML(L) {
+  if (L.kind === 'text') return sec('Text', `<textarea data-k="text" maxlength="300" rows="3" aria-label="Text">${esc(L.text)}</textarea>
+    <div class="dock-row"><select data-k="font" aria-label="Font">${FONTS.map(f => `<option value="${esc(f)}" ${f === L.font ? 'selected' : ''} style="font-family:'${esc(f)}'">${esc(f)}</option>`).join('')}</select>
+      <span class="dk-group">${pic('data-toggle="bold"', '<b>B</b>', 'Bold', L.bold)}${pic('data-toggle="italic"', '<i>I</i>', 'Italic', L.italic)}</span>
+      <span class="dk-group">${pic('data-talign="left"', I.alignL, 'Align text left', L.align === 'left')}${pic('data-talign="center"', I.alignCH, 'Centre text', L.align === 'center')}${pic('data-talign="right"', I.alignR, 'Align text right', L.align === 'right')}</span></div>
+    ${slider('size', 'Size', 10, 200, 1, L.size)}${swatches('color', L.color)}
+    <div class="dock-row"><label class="dk-check"><input type="checkbox" data-k="strokeOn" ${L.stroke ? 'checked' : ''}> Outline</label>${L.stroke ? `<input type="color" data-k="stroke" value="${esc(L.stroke)}" aria-label="Outline colour">` : ''}</div>`);
+  if (L.kind === 'shape') return sec('Fill &amp; stroke', `${swatches('fill', L.fill)}
+    <div class="dock-row"><label class="dk-check"><input type="checkbox" data-k="strokeOn" ${L.stroke ? 'checked' : ''}> Stroke</label>${L.stroke ? `<input type="color" data-k="stroke" value="${esc(L.stroke)}" aria-label="Stroke colour">` : ''}</div>
+    ${slider('strokeWidth', 'Stroke', 0, 30, 1, L.strokeWidth)}${L.shape === 'rect' ? slider('radius', 'Corners', 0, 150, 1, L.radius) : ''}`);
+  return sec('Image', `<div class="dock-row"><button type="button" class="dk-btn accent" data-act="cutout">${I.wand}<span>${L.orig ? 'Background removed' : 'Remove background'}</span></button>${L.orig ? `<button type="button" class="dk-btn" data-act="restore">${I.restore}<span>Original</span></button>` : ''}</div>
+    ${L.orig ? `${slider('cutTol', 'Strength', 5, 120, 1, L.cutTol ?? 40)}<p class="hint small">Too much eaten away? Lower it. Background bits left? Raise it.</p>` : '<p class="hint small">Works best on a plain background: a drawing on white paper, a green screen.</p>'}
+    <label class="dk-btn filebtn">${I.restore}<span>Replace image</span><input id="pReplaceFile" type="file" accept="image/*" hidden></label>`)
+    + sec('Adjust', `${slider('bright', 'Brightness', 0.4, 1.8, 0.02, L.bright)}${slider('contrast', 'Contrast', 0.4, 1.8, 0.02, L.contrast)}${slider('sat', 'Saturation', 0, 2, 0.05, L.sat)}${slider('hue', 'Hue', -180, 180, 1, L.hue || 0)}
+    <button type="button" class="dk-btn" data-act="resetLook">${I.restore}<span>Reset</span></button>`);
 }
 function renderLayerProps() {
   const L = selectedLayer(); const box = $('#layerProps');
-  if (!L) { box.innerHTML = '<p class="hint small">Select a layer to edit it, or add one above.</p>'; return; }
-  const kindHtml = L.kind === 'image' ? imagePropsHTML(L) : L.kind === 'text' ? textPropsHTML(L) : shapePropsHTML(L);
+  if (!L) { box.innerHTML = '<p class="hint small">Select a layer on the canvas or in the list to edit it.</p>'; return; }
+  const fx = L.fx || 'none';
   box.innerHTML = `
-    <div class="propHead">${kindIcon(L)} <input id="pName" class="layerNameBig" type="text" maxlength="40" value="${esc(L.name)}"></div>
-    ${L.locked ? '<p class="hint small">🔒 Locked — unlock it in the layer list to edit.</p>' : ''}
+    <div class="propHead">${layerThumb(L)}<input data-k="name" class="layerNameBig" type="text" maxlength="40" value="${esc(L.name)}" aria-label="Layer name">
+      ${pic('data-act="lock"', L.locked ? I.lock : I.unlock, L.locked ? 'Unlock' : 'Lock', L.locked)}</div>
+    ${L.locked ? '<p class="hint small">🔒 Locked so it can\'t be nudged by accident. Unlock it to edit.</p>' : ''}
     <fieldset id="propFields" ${L.locked ? 'disabled' : ''}>
-      <label>Opacity <input class="pRange" data-k="opacity" type="range" min="0" max="1" step="0.02" value="${L.opacity}"></label>
-      <div class="alignGrid">
-        <button class="btn ghost tiny" data-align="left" type="button" title="Align left">L</button>
-        <button class="btn ghost tiny" data-align="centerX" type="button" title="Center horizontally">C</button>
-        <button class="btn ghost tiny" data-align="right" type="button" title="Align right">R</button>
-        <button class="btn ghost tiny" data-align="top" type="button" title="Align top">T</button>
-        <button class="btn ghost tiny" data-align="centerY" type="button" title="Center vertically">M</button>
-        <button class="btn ghost tiny" data-align="bottom" type="button" title="Align bottom">B</button>
-      </div>
-      ${kindHtml}
-      <div class="row2">
-        <button id="pDup" class="btn ghost small" type="button">⧉ Duplicate</button>
-        <button id="pDel" class="btn ghost small danger" type="button">✕ Delete</button>
-      </div>
+      ${sec('Arrange', `<div class="dock-row"><span class="dk-group">${pic('data-align="left"', I.alignL, 'Align left')}${pic('data-align="centerX"', I.alignCH, 'Centre horizontally')}${pic('data-align="right"', I.alignR, 'Align right')}</span>
+        <span class="dk-group">${pic('data-align="top"', I.alignT, 'Align top')}${pic('data-align="centerY"', I.alignCV, 'Centre vertically')}${pic('data-align="bottom"', I.alignB, 'Align bottom')}</span></div>
+        <div class="dock-row"><span class="dk-group">${pic('data-act="back"', I.down, 'Send backward  [')}${pic('data-act="front"', I.up, 'Bring forward  ]')}${pic('data-act="dup"', I.dup, 'Duplicate  Ctrl+D')}${pic('data-act="del"', I.trash, 'Delete  Del')}</span></div>
+        ${slider('opacity', 'Opacity', 0, 1, 0.02, L.opacity)}
+        <label class="dk-field"><span>Blend</span><select data-k="blend">${Object.entries(BLENDS).map(([k, v]) => `<option value="${k}" ${(L.blend || 'normal') === k ? 'selected' : ''}>${v}</option>`).join('')}</select></label>`)}
+      ${styleHTML(L)}
+      ${sec('Effects', `<div class="seg-soft" role="group" aria-label="Effect">${Object.entries(LAYER_FX).map(([k, v]) => `<button type="button" data-setfx="${k}" aria-pressed="${fx === k}">${v}</button>`).join('')}</div>
+        ${fx !== 'none' ? swatches('fxColor', L.fxColor || FX_COLOR[fx]) + slider('fxSize', 'Amount', 0.2, 3, 0.05, L.fxSize ?? 1) : ''}`)}
     </fieldset>`;
-  $('#pName').addEventListener('focus', () => snap());
-  $('#pName').addEventListener('input', e => { L.name = e.target.value.slice(0, 40) || L.kind; scheduleSave(); scheduleUndoCommit(); renderLayerRowName(L); });
-  document.querySelectorAll('#layerProps .pRange').forEach(inp => {
-    inp.addEventListener('focus', () => snap());
-    inp.addEventListener('input', e => { L[e.target.dataset.k] = +e.target.value; updatePreview(); scheduleSave(); scheduleUndoCommit(); });
-  });
-  document.querySelectorAll('#layerProps [data-align]').forEach(btn => btn.addEventListener('click', () => {
-    const pre = JSON.stringify(kit); alignLayer(L, btn.dataset.align); pushUndo(pre); scheduleSave(); updatePreview();
-  }));
-  $('#pDup').addEventListener('click', duplicateLayer);
-  $('#pDel').addEventListener('click', deleteSelectedLayer);
-  if (L.kind === 'image') bindImageProps(L); else if (L.kind === 'text') bindTextProps(L); else bindShapeProps(L);
 }
+const lp = $('#layerProps');
+lp.addEventListener('focusin', e => { if (e.target.matches('input, textarea, select')) snap(); });
+lp.addEventListener('input', e => {
+  const L = selectedLayer(), el = e.target, k = el.dataset.k; if (!L || !k) return;
+  const out = lp.querySelector(`[data-out="${k}"]`); if (out) out.textContent = FMT[k](+el.value);
+  if (k === 'cutTol') return;
+  snap();
+  if (k === 'name') { L.name = el.value.slice(0, 40) || L.kind; renderLayerRowName(L); }
+  else if (k === 'strokeOn') L.stroke = el.checked ? (L.kind === 'text' ? '#171724' : '#171724') : '';
+  else if (k === 'text') L.text = el.value.slice(0, 300);
+  else L[k] = el.type === 'range' ? +el.value : el.value;
+  if (k === 'blend' && L.blend === 'normal') delete L.blend;
+  updatePreview(); scheduleSave(); scheduleUndoCommit();
+  if (k === 'strokeOn') renderLayerProps();
+  if (['color', 'fill', 'fxColor'].includes(k)) lp.querySelectorAll(`[data-swf="${k}"]`).forEach(b => b.setAttribute('aria-pressed', String(b.dataset.sw === el.value.toLowerCase())));
+  if (['blend', 'opacity', 'color', 'fill'].includes(k)) renderLayers();
+});
+lp.addEventListener('change', async e => {
+  const L = selectedLayer(); if (!L) return;
+  if (e.target.dataset.k === 'cutTol') { L.cutTol = +e.target.value; return cutOut(L); }
+  if (e.target.id === 'pReplaceFile') {
+    const f = e.target.files[0]; if (!f) return;
+    const pre = JSON.stringify(kit);
+    try { await importPlainImage(f, selected(), 0, 0, L); } catch (err) { toast(err.message || 'Could not load that image.'); return; }
+    delete L.orig; delete L.cutTol;
+    pushUndo(pre); scheduleSave(); renderLayers(); renderLayerProps(); updatePreview();
+  }
+});
+lp.addEventListener('click', e => {
+  const b = e.target.closest('button'); const L = selectedLayer(); if (!b || !L) return;
+  const d = b.dataset;
+  if (d.act === 'dup') return duplicateLayer();
+  if (d.act === 'del') return deleteSelectedLayer();
+  if (d.act === 'cutout') return cutOut(L);
+  const pre = JSON.stringify(kit), layers = selected().layers, i = layers.indexOf(L);
+  if (d.align) alignLayer(L, d.align);
+  else if (d.sw) L[d.swf] = d.sw;
+  else if (d.setfx) { if (d.setfx === 'none') delete L.fx; else L.fx = d.setfx; }
+  else if (d.toggle) L[d.toggle] = !L[d.toggle];
+  else if (d.talign) L.align = d.talign;
+  else if (d.act === 'lock') L.locked = !L.locked;
+  else if (d.act === 'restore' && L.orig) { L.asset = L.orig; delete L.orig; delete L.cutTol; }
+  else if (d.act === 'resetLook') Object.assign(L, { bright: 1, contrast: 1, sat: 1, hue: 0 });
+  else if (d.act === 'front' && i < layers.length - 1) layers.splice(i + 1, 0, layers.splice(i, 1)[0]);
+  else if (d.act === 'back' && i > 0) layers.splice(i - 1, 0, layers.splice(i, 1)[0]);
+  else return;
+  pushUndo(pre); scheduleSave(); renderLayers(); renderLayerProps(); updatePreview();
+});
 function duplicateLayer() {
   const it = selected(); const L = selectedLayer(); if (!it || !L) return;
   const pre = JSON.stringify(kit);
-  const copy = JSON.parse(JSON.stringify(L)); copy.id = newId('L'); copy.x += 16; copy.y += 16; copy.name = (L.name || 'Layer') + ' copy';
-  it.layers.push(copy); ui.selLayer = copy.id;
+  const copy = JSON.parse(JSON.stringify(L)); copy.id = newId('L'); copy.x += 16; copy.y += 16; copy.name = (L.name || 'Layer') + ' copy'; copy.locked = false;
+  it.layers.splice(it.layers.indexOf(L) + 1, 0, copy); ui.selLayer = copy.id;
   pushUndo(pre); scheduleSave(); renderLayers(); renderLayerProps(); updatePreview();
 }
 function deleteSelectedLayer() {
@@ -417,6 +491,52 @@ function deleteSelectedLayer() {
   const pre = JSON.stringify(kit);
   it.layers.splice(it.layers.indexOf(L), 1); ui.selLayer = null;
   pushUndo(pre); scheduleSave(); renderLayers(); renderLayerProps(); updatePreview();
+  toast('Layer deleted — Ctrl+Z brings it back.');
+}
+
+// ---------- remove background ----------
+// Flood-fills the most common border colour away from the edges inward, so the same colour
+// inside the drawing survives. Always works from the untouched original (L.orig), so the
+// Strength slider can be re-tuned without degrading the picture.
+async function cutOut(L) {
+  const src = L.orig || L.asset; if (!src) return;
+  toast('✨ Removing the background…');
+  await new Promise(r => setTimeout(r, 30));
+  try {
+    const img = new Image(); img.src = src; await img.decode();
+    const w = img.naturalWidth, h = img.naturalHeight, cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+    const g = cv.getContext('2d', { willReadFrequently: true }); g.drawImage(img, 0, 0);
+    const d = g.getImageData(0, 0, w, h), px = d.data, tol = L.cutTol ?? 40;
+    const edge = [];
+    for (let x = 0; x < w; x++) edge.push(x, (h - 1) * w + x);
+    for (let y = 1; y < h - 1; y++) edge.push(y * w, y * w + w - 1);
+    const key = o => (px[o] >> 4) << 8 | (px[o + 1] >> 4) << 4 | (px[o + 2] >> 4), counts = new Map();
+    for (const i of edge) if (px[i * 4 + 3] > 15) { const k = key(i * 4); counts.set(k, (counts.get(k) || 0) + 1); }
+    if (!counts.size) return toast('This picture already has a see-through background.');
+    const best = [...counts].sort((a, b) => b[1] - a[1])[0][0];
+    let r = 0, gr = 0, b = 0, n = 0;
+    for (const i of edge) { const o = i * 4; if (px[o + 3] > 15 && key(o) === best) { r += px[o]; gr += px[o + 1]; b += px[o + 2]; n++; } }
+    r /= n; gr /= n; b /= n;
+    const far = o => Math.hypot(px[o] - r, px[o + 1] - gr, px[o + 2] - b), bg = i => px[i * 4 + 3] < 16 || far(i * 4) <= tol;
+    const seen = new Uint8Array(w * h), stack = [];
+    for (const i of edge) if (!seen[i] && bg(i)) { seen[i] = 1; stack.push(i); }
+    while (stack.length) {
+      const i = stack.pop(), x = i % w; px[i * 4 + 3] = 0;
+      for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, i - w, i + w]) if (j >= 0 && j < w * h && !seen[j] && bg(j)) { seen[j] = 1; stack.push(j); }
+    }
+    // Soften the new edge: pixels touching the cut fade by how close they are to the background.
+    for (let i = 0; i < w * h; i++) {
+      if (seen[i]) continue;
+      const x = i % w;
+      if (!((x > 0 && seen[i - 1]) || (x < w - 1 && seen[i + 1]) || (i >= w && seen[i - w]) || (i + w < w * h && seen[i + w]))) continue;
+      const o = i * 4, f = far(o); if (f < tol * 2) px[o + 3] = Math.min(px[o + 3], Math.round(255 * (f - tol) / tol));
+    }
+    g.putImageData(d, 0, 0);
+    const pre = JSON.stringify(kit);
+    L.orig ||= L.asset; L.asset = cv.toDataURL('image/png'); L.cutTol = tol;
+    pushUndo(pre); scheduleSave(); renderLayers(); renderLayerProps(); updatePreview();
+    toast('✨ Background removed. Tweak Strength if it took too much or too little.');
+  } catch (err) { console.error(err); toast("Couldn't remove the background from that picture."); }
 }
 
 // ---------- editor: top level ----------
@@ -453,17 +573,23 @@ function liveHref(dataUrl) {
 }
 function updatePreview() {
   const it = selected(); if (!it) { $('#previewSvg').innerHTML = ''; return; }
-  const selL = selectedLayer();
-  const svg = itemSVG(it, 'live', { editing: true, sel: (selL && !selL.locked) ? selL.id : null, href: liveHref });
+  const selL = selectedLayer(), { w } = docSize(it);
+  // Handles are sized in document units per screen pixel, so they look the same on a tiny
+  // token and a 24" board, zoomed in or not.
+  const handleK = view.px ? (w / Math.max(1, view.z)) / view.px : w / 420;
+  const svg = itemSVG(it, 'live', { editing: true, sel: (selL && !selL.locked) ? selL.id : null, href: liveHref, handleK });
   $('#previewSvg').innerHTML = svg;
   const el = $('#previewSvg svg');
   el.style.touchAction = 'none';
   el.addEventListener('pointerdown', e => onCanvasPointerDown(e, it, el));
+  applyViewBox();
+  const px = el.getBoundingClientRect().width;
+  if (px && Math.abs(px - view.px) > 1) { view.px = px; updatePreview(); }
 }
 // Every update rebuilds the preview <svg>, so a gesture can't listen on (or capture the pointer
 // to) the element it started on — that element is gone after the first move, and the drag would
 // stop dead. Gestures listen on the window instead, until the pointer is released.
-function trackGesture(onMove) {
+function trackGesture(onMove, onEnd) {
   // A point the browser couldn't map (preview mid-rebuild, zero-size) is skipped, never
   // written into the layer as NaN.
   const move = ev => { if (document.querySelector('#previewSvg svg')?.getScreenCTM()) onMove(ev); };
@@ -471,10 +597,32 @@ function trackGesture(onMove) {
     window.removeEventListener('pointermove', move);
     window.removeEventListener('pointerup', up);
     window.removeEventListener('pointercancel', up);
+    onEnd?.();
   };
   window.addEventListener('pointermove', move);
   window.addEventListener('pointerup', up);
   window.addEventListener('pointercancel', up);
+}
+// Axis-aligned half-size of a layer after scale + rotation (for snapping and align buttons).
+function extents(L) {
+  const { hw, hh } = layerBox(L), r = (L.rot || 0) * Math.PI / 180, c = Math.abs(Math.cos(r)), n = Math.abs(Math.sin(r));
+  return { ex: (hw * c + hh * n) * L.scale, ey: (hw * n + hh * c) * L.scale };
+}
+// Smart guides: snap the layer's centre or edges to the document's centre and edges, and draw
+// a pink line while snapped. Hold Alt to move freely.
+function snapMove(L, it, free) {
+  const lines = [];
+  if (!free) {
+    const { w, h } = docSize(it), { ex, ey } = extents(L), thr = 7 * (view.px ? (w / view.z) / view.px : 1);
+    for (const [axis, list, e] of [['x', [[w / 2, 0], [0, -1], [w, 1]], ex], ['y', [[h / 2, 0], [0, -1], [h, 1]], ey]])
+      for (const [v, side] of list) { const pos = L[axis] + side * e; if (Math.abs(pos - v) < thr) { L[axis] += v - pos; lines.push([axis, v]); break; } }
+  }
+  return lines;
+}
+function drawGuides(lines) {
+  const g = document.querySelector('#previewSvg #guides'), it = selected(); if (!g || !it) return;
+  const { w, h } = docSize(it), sw = (1.5 * (view.px ? (w / view.z) / view.px : 1)).toFixed(2);
+  g.innerHTML = lines.map(([a, v]) => a === 'x' ? `<line x1="${v}" y1="0" x2="${v}" y2="${h}" stroke="#ff3ea5" stroke-width="${sw}"/>` : `<line x1="0" y1="${v}" x2="${w}" y2="${v}" stroke="#ff3ea5" stroke-width="${sw}"/>`).join('');
 }
 function onCanvasPointerDown(e, it, el) {
   const handle = e.target.closest('[data-handle]');
@@ -488,7 +636,16 @@ function onCanvasPointerDown(e, it, el) {
     const p = new DOMPoint(ev.clientX, ev.clientY).matrixTransform(m.inverse());
     return [p.x, p.y];
   };
-
+  // Pan: the hand tool, Space, the middle button, or dragging empty space while zoomed in.
+  const panning = ui.tool === 'hand' || ui.space || e.button === 1;
+  if (panning || (!handle && !layerEl && view.z > 1)) {
+    e.preventDefault();
+    if (!panning && ui.selLayer) { ui.selLayer = null; renderLayers(); renderLayerProps(); updatePreview(); }
+    const k = metrics().k, x0 = e.clientX, y0 = e.clientY, cx0 = view.cx, cy0 = view.cy;
+    $('#canvasStage').classList.add('panning');
+    trackGesture(ev => { view.cx = cx0 - (ev.clientX - x0) / k; view.cy = cy0 - (ev.clientY - y0) / k; applyViewBox(); }, () => $('#canvasStage').classList.remove('panning'));
+    return;
+  }
   if (handle && ui.selLayer) {
     const L = selectedLayer(); if (!L || L.locked) return;
     e.preventDefault();
@@ -505,7 +662,9 @@ function onCanvasPointerDown(e, it, el) {
       const [sx, sy] = toDoc(e), startAngle = angleAt(sx, sy), startRot = L.rot;
       trackGesture(ev => {
         const [px, py] = toDoc(ev);
-        L.rot = startRot + (angleAt(px, py) - startAngle);
+        let r = startRot + (angleAt(px, py) - startAngle);
+        if (ev.shiftKey) r = Math.round(r / 15) * 15; else if (Math.abs(((r % 360) + 540) % 360 - 180) < 3) r = Math.round(r / 360) * 360;
+        L.rot = r;
         updatePreview(); scheduleUndoCommit(); scheduleSave();
       });
     }
@@ -523,8 +682,9 @@ function onCanvasPointerDown(e, it, el) {
     trackGesture(ev => {
       const [px, py] = toDoc(ev);
       L.x = ox + (px - startX); L.y = oy + (py - startY);
-      updatePreview(); scheduleUndoCommit(); scheduleSave();
-    });
+      const lines = snapMove(L, it, ev.altKey);
+      updatePreview(); drawGuides(lines); scheduleUndoCommit(); scheduleSave();
+    }, () => drawGuides([]));
     return;
   }
   if (ui.selLayer) { ui.selLayer = null; renderLayers(); renderLayerProps(); updatePreview(); }

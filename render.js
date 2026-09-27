@@ -45,14 +45,19 @@ export function maskMarkup(shape, w, h) {
   return `<rect width="${w}" height="${h}"/>`;
 }
 
+// Blend modes (CSS mix-blend-mode, which PNG export honours too) and layer effects.
+export const BLENDS = { normal: 'Normal', multiply: 'Multiply', screen: 'Screen', overlay: 'Overlay', 'soft-light': 'Soft light', 'hard-light': 'Hard light', darken: 'Darken', lighten: 'Lighten', 'color-dodge': 'Color dodge', 'color-burn': 'Color burn', difference: 'Difference', hue: 'Hue', color: 'Color', luminosity: 'Luminosity' };
+export const LAYER_FX = { none: 'No effect', shadow: 'Drop shadow', glow: 'Glow', outline: 'Sticker outline' };
+export const FX_COLOR = { shadow: '#000000', glow: '#ffda52', outline: '#ffffff' };
+
 export const layerTransform = L => `translate(${L.x.toFixed(1)} ${L.y.toFixed(1)}) rotate(${(L.rot || 0).toFixed(1)}) scale(${L.scale.toFixed(3)})`;
 export function layerBox(L) { return { hw: L.w / 2, hh: L.h / 2 }; }
 
 function layerBody(L, uid, href) {
   if (L.kind === 'image') {
-    const b = L.bright ?? 1, k = L.contrast ?? 1, s = L.sat ?? 1, fx = `fx-${uid}-${L.id}`, tuned = b !== 1 || k !== 1 || s !== 1;
+    const b = L.bright ?? 1, k = L.contrast ?? 1, s = L.sat ?? 1, hue = L.hue || 0, fx = `fx-${uid}-${L.id}`, tuned = b !== 1 || k !== 1 || s !== 1 || hue !== 0;
     const fn = ch => `<feFunc${ch} type="linear" slope="${(k * b).toFixed(3)}" intercept="${((0.5 - 0.5 * k) * b).toFixed(3)}"/>`;
-    const filter = tuned ? `<defs><filter id="${fx}" color-interpolation-filters="sRGB"><feColorMatrix type="saturate" values="${s}"/><feComponentTransfer>${fn('R')}${fn('G')}${fn('B')}</feComponentTransfer></filter></defs>` : '';
+    const filter = tuned ? `<defs><filter id="${fx}" color-interpolation-filters="sRGB"><feColorMatrix type="saturate" values="${s}"/>${hue ? `<feColorMatrix type="hueRotate" values="${+hue}"/>` : ''}<feComponentTransfer>${fn('R')}${fn('G')}${fn('B')}</feComponentTransfer></filter></defs>` : '';
     return `${filter}<image href="${esc(href ? href(L.asset) : L.asset)}" x="${-L.w / 2}" y="${-L.h / 2}" width="${L.w}" height="${L.h}" preserveAspectRatio="xMidYMid slice"${tuned ? ` filter="url(#${fx})"` : ''}/>`;
   }
   if (L.kind === 'shape') {
@@ -68,22 +73,42 @@ function layerBody(L, uid, href) {
   const strokeAttr = L.stroke ? ` stroke="${esc(L.stroke)}" stroke-width="${Math.max(2, L.size / 8).toFixed(1)}" paint-order="stroke" stroke-linejoin="round"` : '';
   return lines.map((ln, i) => `<text x="${tx.toFixed(1)}" y="${(y0 + i * step).toFixed(1)}" text-anchor="${anchor}" font-family="${fam(L.font)}" font-weight="${L.bold ? 800 : 500}" font-size="${L.size}" fill="${esc(L.color)}"${L.italic ? ' font-style="italic"' : ''}${strokeAttr}>${esc(ln)}</text>`).join('');
 }
-function layerMarkup(L, uid, ghost, href) {
+// Shadow / glow / outline in document units, sized from the document (u = one "card pixel"),
+// so a board and a card get the same-looking effect.
+function fxFilter(L, id, doc) {
+  const col = esc(/^#[0-9a-f]{6}$/i.test(L.fxColor || '') ? L.fxColor : FX_COLOR[L.fx]);
+  const u = Math.min(doc.w, doc.h) / 500 * (+(L.fxSize ?? 1) || 1), f = v => (v * u).toFixed(1);
+  const open = `<filter id="${id}" filterUnits="userSpaceOnUse" x="${-doc.w / 2}" y="${-doc.h / 2}" width="${doc.w * 2}" height="${doc.h * 2}" color-interpolation-filters="sRGB">`;
+  if (L.fx === 'shadow') return `${open}<feDropShadow dx="${f(4)}" dy="${f(7)}" stdDeviation="${f(5)}" flood-color="${col}" flood-opacity=".6"/></filter>`;
+  if (L.fx === 'glow') return `${open}<feMorphology in="SourceAlpha" operator="dilate" radius="${f(2)}"/><feGaussianBlur stdDeviation="${f(7)}" result="b"/><feFlood flood-color="${col}"/><feComposite in2="b" operator="in" result="g"/><feMerge><feMergeNode in="g"/><feMergeNode in="g"/><feMergeNode in="SourceGraphic"/></feMerge></filter>`;
+  if (L.fx === 'outline') return `${open}<feMorphology in="SourceAlpha" operator="dilate" radius="${f(5)}" result="d"/><feFlood flood-color="${col}"/><feComposite in2="d" operator="in" result="o"/><feMerge><feMergeNode in="o"/><feMergeNode in="SourceGraphic"/></feMerge></filter>`;
+  return '';
+}
+// The effect and blend mode sit on an untransformed wrapper, so a shadow falls the same way
+// however the layer is spun or scaled.
+function layerMarkup(L, uid, ghost, href, doc) {
   if (L.hidden) return '';
   // The ghost is a second copy of the selected layer — it needs its own filter id, or both
   // copies' <filter> defs collide in the same SVG.
-  return `<g ${ghost ? 'data-ghost' : 'data-layer'}="${L.id}" transform="${layerTransform(L)}" opacity="${ghost ? 0.28 : L.opacity}"${ghost ? ' pointer-events="none"' : ' class="layer"'}>${layerBody(L, ghost ? `${uid}g` : uid, href)}</g>`;
+  const inner = `<g ${ghost ? 'data-ghost' : 'data-layer'}="${L.id}" transform="${layerTransform(L)}" opacity="${ghost ? 0.28 : L.opacity}"${ghost ? ' pointer-events="none"' : ' class="layer"'}>${layerBody(L, ghost ? `${uid}g` : uid, href)}</g>`;
+  if (ghost) return inner;
+  const fid = `lx-${uid}-${L.id}`, filter = LAYER_FX[L.fx] && L.fx !== 'none' ? fxFilter(L, fid, doc) : '';
+  const blend = BLENDS[L.blend] && L.blend !== 'normal' ? ` style="mix-blend-mode:${L.blend}"` : '';
+  if (!filter && !blend) return inner;
+  return `${filter ? `<defs>${filter}</defs>` : ''}<g${filter ? ` filter="url(#${fid})"` : ''}${blend}>${inner}</g>`;
 }
 
-export function handlesMarkup(L) {
+// k scales handle size (the editor passes doc-units-per-screen-pixel), so handles stay
+// finger-sized on a huge board or a zoomed-in canvas.
+export function handlesMarkup(L, k = 1) {
   if (!L || L.hidden) return '';
   const { hw, hh } = layerBox(L), s = L.scale, r = (L.rot || 0) * Math.PI / 180, cos = Math.cos(r), sin = Math.sin(r);
   const P = (lx, ly) => [L.x + lx * cos - ly * sin, L.y + lx * sin + ly * cos];
   const corners = [[-hw * s, -hh * s], [hw * s, -hh * s], [hw * s, hh * s], [-hw * s, hh * s]].map(p => P(...p));
-  const top = P(0, -hh * s), rot = P(0, -hh * s - 40);
-  const dot = (p, kind, fill) => `<circle data-handle="${kind}" cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="26" fill="transparent"/><circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="11" fill="${fill}" stroke="#171724" stroke-width="3" pointer-events="none"/>`;
-  return `<polygon points="${corners.map(p => p.map(v => v.toFixed(1)).join(',')).join(' ')}" fill="none" stroke="#2f5bd3" stroke-width="2.5" stroke-dasharray="9 5" pointer-events="none"/>
-  <line x1="${top[0].toFixed(1)}" y1="${top[1].toFixed(1)}" x2="${rot[0].toFixed(1)}" y2="${rot[1].toFixed(1)}" stroke="#2f5bd3" stroke-width="2.5" pointer-events="none"/>
+  const top = P(0, -hh * s), rot = [top[0] + 36 * k * sin, top[1] - 36 * k * cos], sw = (2 * k).toFixed(2);
+  const dot = (p, kind, fill) => `<circle data-handle="${kind}" cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="${(22 * k).toFixed(1)}" fill="transparent"/><circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="${(8 * k).toFixed(1)}" fill="${fill}" stroke="#2f7bff" stroke-width="${sw}" pointer-events="none"/>`;
+  return `<polygon points="${corners.map(p => p.map(v => v.toFixed(1)).join(',')).join(' ')}" fill="none" stroke="#2f7bff" stroke-width="${sw}" pointer-events="none"/>
+  <line x1="${top[0].toFixed(1)}" y1="${top[1].toFixed(1)}" x2="${rot[0].toFixed(1)}" y2="${rot[1].toFixed(1)}" stroke="#2f7bff" stroke-width="${sw}" pointer-events="none"/>
   ${corners.map(p => dot(p, 'scale', '#ffffff')).join('')}${dot(rot, 'rotate', '#ffda52')}`;
 }
 
@@ -97,11 +122,11 @@ export function itemSVG(item, uid = 'x', ctx = {}) {
   const layers = item.layers || [];
   const selL = ctx.editing && ctx.sel ? layers.find(l => l.id === ctx.sel) : null;
   const body = `${masked ? `<g clip-path="url(#${clipId})">` : ''}
-    ${selL ? layerMarkup(selL, uid, true, ctx.href) : ''}
-    ${layers.map(l => layerMarkup(l, uid, false, ctx.href)).join('')}
+    ${selL ? layerMarkup(selL, uid, true, ctx.href, { w, h }) : ''}
+    ${layers.map(l => layerMarkup(l, uid, false, ctx.href, { w, h })).join('')}
     ${masked ? '</g>' : ''}`;
   const border = !ctx.editing ? '' : masked ? `<g fill="none" stroke="#171724" stroke-width="2" opacity=".18">${maskMarkup(item.mask, w, h)}</g>` : `<rect x="1" y="1" width="${w - 2}" height="${h - 2}" fill="none" stroke="#171724" stroke-width="2" opacity=".18"/>`;
-  const handles = ctx.editing ? `<g id="handles">${handlesMarkup(selL)}</g>` : '';
+  const handles = ctx.editing ? `<g id="guides" pointer-events="none"></g><g id="handles">${handlesMarkup(selL, ctx.handleK ?? 1)}</g>` : '';
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
     ${masked ? `<defs><clipPath id="${clipId}">${maskMarkup(item.mask, w, h)}</clipPath></defs>` : ''}
     ${body}${border}${handles}
