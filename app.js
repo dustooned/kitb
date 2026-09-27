@@ -436,48 +436,78 @@ function renderEditor() {
 }
 
 // ---------- canvas: render + drag/scale/rotate handles ----------
+/** Embedded image (data: URL, often megabytes) -> a short blob: URL for the live preview only,
+ *  decoded once per image, so dragging a layer doesn't re-parse all that base64 every frame. */
+const liveHrefs = new Map();
+function liveHref(dataUrl) {
+  if (!dataUrl || !dataUrl.startsWith('data:')) return dataUrl;
+  let url = liveHrefs.get(dataUrl);
+  if (!url) {
+    const [head, b64] = dataUrl.split(',');
+    const bin = atob(b64), bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    url = URL.createObjectURL(new Blob([bytes], { type: head.slice(5, head.indexOf(';')) }));
+    liveHrefs.set(dataUrl, url);
+  }
+  return url;
+}
 function updatePreview() {
   const it = selected(); if (!it) { $('#previewSvg').innerHTML = ''; return; }
   const selL = selectedLayer();
-  const svg = itemSVG(it, 'live', { editing: true, sel: (selL && !selL.locked) ? selL.id : null });
+  const svg = itemSVG(it, 'live', { editing: true, sel: (selL && !selL.locked) ? selL.id : null, href: liveHref });
   $('#previewSvg').innerHTML = svg;
   const el = $('#previewSvg svg');
   el.style.touchAction = 'none';
   el.addEventListener('pointerdown', e => onCanvasPointerDown(e, it, el));
 }
-// Capture failing (e.g. a pointer session the browser doesn't consider active) just means the
-// drag won't keep tracking if the cursor leaves the canvas — never worth losing the interaction over.
-function tryCapture(el, id) { try { el.setPointerCapture(id); } catch {} }
+// Every update rebuilds the preview <svg>, so a gesture can't listen on (or capture the pointer
+// to) the element it started on — that element is gone after the first move, and the drag would
+// stop dead. Gestures listen on the window instead, until the pointer is released.
+function trackGesture(onMove) {
+  // A point the browser couldn't map (preview mid-rebuild, zero-size) is skipped, never
+  // written into the layer as NaN.
+  const move = ev => { if (document.querySelector('#previewSvg svg')?.getScreenCTM()) onMove(ev); };
+  const up = () => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    window.removeEventListener('pointercancel', up);
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+  window.addEventListener('pointercancel', up);
+}
 function onCanvasPointerDown(e, it, el) {
   const handle = e.target.closest('[data-handle]');
   const layerEl = e.target.closest('[data-layer]');
-  const { w: dw } = docSize(it);
-  const rect = el.getBoundingClientRect(), unitsPerPx = dw / rect.width;
-  const toDoc = ev => [(ev.clientX - rect.left) * unitsPerPx, (ev.clientY - rect.top) * unitsPerPx];
+  // Screen -> card units through the browser's own transform for the *current* preview <svg>
+  // (it's rebuilt on every update). Unlike width-ratio math this is exact when the card is
+  // letterboxed inside a differently-shaped preview box, and never divides by a zero-size box.
+  const toDoc = ev => {
+    const s = document.querySelector('#previewSvg svg'), m = s?.getScreenCTM();
+    if (!m) return [NaN, NaN];
+    const p = new DOMPoint(ev.clientX, ev.clientY).matrixTransform(m.inverse());
+    return [p.x, p.y];
+  };
 
   if (handle && ui.selLayer) {
     const L = selectedLayer(); if (!L || L.locked) return;
-    tryCapture(el, e.pointerId);
+    e.preventDefault();
     snap();
     if (handle.dataset.handle === 'scale') {
       const [sx, sy] = toDoc(e), startDist = Math.hypot(sx - L.x, sy - L.y) || 1, startScale = L.scale;
-      const move = ev => {
+      trackGesture(ev => {
         const [px, py] = toDoc(ev), dist = Math.hypot(px - L.x, py - L.y);
         L.scale = Math.max(0.05, Math.min(20, startScale * (dist / startDist)));
         updatePreview(); scheduleUndoCommit(); scheduleSave();
-      };
-      const up = () => { el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', up); };
-      el.addEventListener('pointermove', move); el.addEventListener('pointerup', up);
+      });
     } else {
       const angleAt = (x, y) => Math.atan2(y - L.y, x - L.x) * 180 / Math.PI;
       const [sx, sy] = toDoc(e), startAngle = angleAt(sx, sy), startRot = L.rot;
-      const move = ev => {
+      trackGesture(ev => {
         const [px, py] = toDoc(ev);
         L.rot = startRot + (angleAt(px, py) - startAngle);
         updatePreview(); scheduleUndoCommit(); scheduleSave();
-      };
-      const up = () => { el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', up); };
-      el.addEventListener('pointermove', move); el.addEventListener('pointerup', up);
+      });
     }
     return;
   }
@@ -487,16 +517,14 @@ function onCanvasPointerDown(e, it, el) {
     if (!L) return;
     if (ui.selLayer !== id) { ui.selLayer = id; renderLayers(); renderLayerProps(); updatePreview(); }
     if (L.locked) return;
-    tryCapture(el, e.pointerId);
+    e.preventDefault();
     snap();
     const [startX, startY] = toDoc(e), ox = L.x, oy = L.y;
-    const move = ev => {
+    trackGesture(ev => {
       const [px, py] = toDoc(ev);
       L.x = ox + (px - startX); L.y = oy + (py - startY);
       updatePreview(); scheduleUndoCommit(); scheduleSave();
-    };
-    const up = () => { el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', up); };
-    el.addEventListener('pointermove', move); el.addEventListener('pointerup', up);
+    });
     return;
   }
   if (ui.selLayer) { ui.selLayer = null; renderLayers(); renderLayerProps(); updatePreview(); }

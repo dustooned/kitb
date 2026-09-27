@@ -48,12 +48,12 @@ export function maskMarkup(shape, w, h) {
 export const layerTransform = L => `translate(${L.x.toFixed(1)} ${L.y.toFixed(1)}) rotate(${(L.rot || 0).toFixed(1)}) scale(${L.scale.toFixed(3)})`;
 export function layerBox(L) { return { hw: L.w / 2, hh: L.h / 2 }; }
 
-function layerBody(L, uid) {
+function layerBody(L, uid, href) {
   if (L.kind === 'image') {
     const b = L.bright ?? 1, k = L.contrast ?? 1, s = L.sat ?? 1, fx = `fx-${uid}-${L.id}`, tuned = b !== 1 || k !== 1 || s !== 1;
     const fn = ch => `<feFunc${ch} type="linear" slope="${(k * b).toFixed(3)}" intercept="${((0.5 - 0.5 * k) * b).toFixed(3)}"/>`;
     const filter = tuned ? `<defs><filter id="${fx}" color-interpolation-filters="sRGB"><feColorMatrix type="saturate" values="${s}"/><feComponentTransfer>${fn('R')}${fn('G')}${fn('B')}</feComponentTransfer></filter></defs>` : '';
-    return `${filter}<image href="${esc(L.asset)}" x="${-L.w / 2}" y="${-L.h / 2}" width="${L.w}" height="${L.h}" preserveAspectRatio="xMidYMid slice"${tuned ? ` filter="url(#${fx})"` : ''}/>`;
+    return `${filter}<image href="${esc(href ? href(L.asset) : L.asset)}" x="${-L.w / 2}" y="${-L.h / 2}" width="${L.w}" height="${L.h}" preserveAspectRatio="xMidYMid slice"${tuned ? ` filter="url(#${fx})"` : ''}/>`;
   }
   if (L.kind === 'shape') {
     const paint = `fill="${L.shape === 'line' ? 'none' : esc(L.fill)}"${L.stroke ? ` stroke="${esc(L.stroke)}" stroke-width="${L.strokeWidth}"` : (L.shape === 'line' ? ` stroke="${esc(L.fill)}" stroke-width="${Math.max(2, L.strokeWidth)}"` : '')} stroke-linejoin="round"`;
@@ -68,9 +68,11 @@ function layerBody(L, uid) {
   const strokeAttr = L.stroke ? ` stroke="${esc(L.stroke)}" stroke-width="${Math.max(2, L.size / 8).toFixed(1)}" paint-order="stroke" stroke-linejoin="round"` : '';
   return lines.map((ln, i) => `<text x="${tx.toFixed(1)}" y="${(y0 + i * step).toFixed(1)}" text-anchor="${anchor}" font-family="${fam(L.font)}" font-weight="${L.bold ? 800 : 500}" font-size="${L.size}" fill="${esc(L.color)}"${L.italic ? ' font-style="italic"' : ''}${strokeAttr}>${esc(ln)}</text>`).join('');
 }
-function layerMarkup(L, uid, ghost) {
+function layerMarkup(L, uid, ghost, href) {
   if (L.hidden) return '';
-  return `<g ${ghost ? 'data-ghost' : 'data-layer'}="${L.id}" transform="${layerTransform(L)}" opacity="${ghost ? 0.28 : L.opacity}"${ghost ? ' pointer-events="none"' : ' class="layer"'}>${layerBody(L, uid)}</g>`;
+  // The ghost is a second copy of the selected layer — it needs its own filter id, or both
+  // copies' <filter> defs collide in the same SVG.
+  return `<g ${ghost ? 'data-ghost' : 'data-layer'}="${L.id}" transform="${layerTransform(L)}" opacity="${ghost ? 0.28 : L.opacity}"${ghost ? ' pointer-events="none"' : ' class="layer"'}>${layerBody(L, ghost ? `${uid}g` : uid, href)}</g>`;
 }
 
 export function handlesMarkup(L) {
@@ -85,15 +87,18 @@ export function handlesMarkup(L) {
   ${corners.map(p => dot(p, 'scale', '#ffffff')).join('')}${dot(rot, 'rotate', '#ffda52')}`;
 }
 
-/** ctx: { editing, sel } — editing draws selection handles; sel is the selected layer id. */
+/** ctx: { editing, sel, href } — editing draws selection handles; sel is the selected layer id;
+ *  href (live preview only) maps an embedded image to a short URL, so every redraw doesn't
+ *  re-parse megabytes of base64. Exports leave it out: a rasterized SVG can only use the
+ *  embedded data itself. */
 export function itemSVG(item, uid = 'x', ctx = {}) {
   const { w, h } = docSize(item), masked = item.mask && item.mask !== 'none';
   const clipId = `mask-${uid}`;
   const layers = item.layers || [];
   const selL = ctx.editing && ctx.sel ? layers.find(l => l.id === ctx.sel) : null;
   const body = `${masked ? `<g clip-path="url(#${clipId})">` : ''}
-    ${selL ? layerMarkup(selL, uid, true) : ''}
-    ${layers.map(l => layerMarkup(l, uid)).join('')}
+    ${selL ? layerMarkup(selL, uid, true, ctx.href) : ''}
+    ${layers.map(l => layerMarkup(l, uid, false, ctx.href)).join('')}
     ${masked ? '</g>' : ''}`;
   const border = !ctx.editing ? '' : masked ? `<g fill="none" stroke="#171724" stroke-width="2" opacity=".18">${maskMarkup(item.mask, w, h)}</g>` : `<rect x="1" y="1" width="${w - 2}" height="${h - 2}" fill="none" stroke="#171724" stroke-width="2" opacity=".18"/>`;
   const handles = ctx.editing ? `<g id="handles">${handlesMarkup(selL)}</g>` : '';
