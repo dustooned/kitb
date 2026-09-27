@@ -1,7 +1,7 @@
 // Offline-first cache for the app shell, so it keeps working on flaky classroom wifi.
 // Bump CACHE when shipping a new version so clients pick up fresh files.
-const CACHE = 'kit-forge-v4';
-const SHELL = ['./', './index.html', './style.css', './app.js', './model.js', './render.js', './project.js', './store.js', './version.js', './icon.svg', './manifest.webmanifest'];
+const CACHE = 'kit-forge-v5';
+const SHELL = ['./', './index.html', './style.css', './app.js', './model.js', './render.js', './project.js', './store.js', './version.js', './icon.svg', './manifest.webmanifest', './manual.html'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)));

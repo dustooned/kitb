@@ -61,6 +61,7 @@ textarea { resize: vertical; }
   display: inline-flex; align-items: center; gap: 6px; transition: filter .15s, transform .1s, background .15s;
 }
 .btn:active { transform: translateY(1px); }
+a.btn { text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
 .btn.primary { background: var(--accent); color: #fff; box-shadow: 0 2px 6px rgba(224,83,61,.35); }
 .btn.primary:hover { background: var(--accent-dark); }
 .btn.ghost { background: rgba(255,255,255,.09); color: #fff; border: 1.5px solid rgba(255,255,255,.16); }
