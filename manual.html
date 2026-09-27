@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kit Forge Manual</title>
+<style>
+:root{--bg:#f6f8fb;--card:#fff;--ink:#14213d;--mute:#56607a;--accent:#0b4ea2;--gold:#f2b705;--line:#dde3ee}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0e1524;--card:#16203a;--ink:#e8edf7;--mute:#9aa6c2;--accent:#6ea8ff;--gold:#f2b705;--line:#26324f}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 system-ui,Segoe UI,Roboto,sans-serif}
+header{background:var(--accent);color:#fff;padding:28px 16px;border-bottom:5px solid var(--gold)}
+header h1{margin:0 0 4px;font-size:1.8rem}header p{margin:0;opacity:.9}
+main{max-width:860px;margin:0 auto;padding:16px}
+nav{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 20px}
+nav a{background:var(--card);border:1px solid var(--line);border-radius:999px;padding:4px 12px;color:var(--accent);text-decoration:none;font-size:.9rem}
+section{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 20px;margin-bottom:16px}
+h2{margin:0 0 8px;font-size:1.25rem}h3{margin:14px 0 4px;font-size:1.05rem}
+table{width:100%;border-collapse:collapse;font-size:.95rem}td,th{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+kbd{border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px;font-size:.85em;background:var(--bg)}
+.tip{border-left:4px solid var(--gold);padding:6px 12px;background:var(--bg);border-radius:0 8px 8px 0;margin:10px 0}
+a{color:var(--accent)}
+</style>
+</head>
+<body>
+<header><h1>🛠️ Kit Forge Manual</h1><p>Make cards, pieces and boards in your browser. Nothing to install, no account.</p></header>
+<main>
+<nav><a href="#start">Quick start</a><a href="#layers">Layers</a><a href="#import">Importing art</a><a href="#export">Saving &amp; exporting</a><a href="#table">Playtesting in SAGA</a><a href="#keys">Shortcuts</a><a href="#help">Troubleshooting</a></nav>
+
+<section id="start"><h2>Quick start (5 minutes)</h2>
+<ol>
+<li>Open the class link: <a href="./">Kit Forge</a>. Fill in <b>Kit info</b> (kit title, your name or team, class).</li>
+<li>Pick a tab: <b>Cards</b>, <b>Pieces</b> or <b>Boards</b>. Add a category with <b>＋</b>, then add an item with <b>＋</b>.</li>
+<li>Choose a size preset (poker, tarot, square, 8×8" board…) or type custom inches.</li>
+<li>Build the design from layers: image, text and shapes.</li>
+<li>Press <b>Export ZIP</b> to hand it in, or <b>Send to Table</b> to playtest it.</li>
+</ol>
+<div class="tip">Your work autosaves in <b>this browser on this computer</b> only. Export a ZIP before you leave a school computer.</div>
+</section>
+
+<section id="layers"><h2>Working with layers</h2>
+<table>
+<tr><td><b>Move</b></td><td>Drag the layer on the canvas.</td></tr>
+<tr><td><b>Scale</b></td><td>Drag the corner handle.</td></tr>
+<tr><td><b>Rotate</b></td><td>Drag the top handle.</td></tr>
+<tr><td><b>Order / hide / lock</b></td><td>Use the <b>Layers</b> panel. Locked layers can't be dragged by accident.</td></tr>
+<tr><td><b>Duplicate / delete</b></td><td>Layers panel buttons, or select and press <kbd>Delete</kbd>.</td></tr>
+</table>
+<p>Pieces come in circle, square, rounded square, hex and diamond. Uploaded art trims its transparent border automatically.</p>
+</section>
+
+<section id="import"><h2>Importing art</h2>
+<table>
+<tr><th>File</th><th>What happens</th></tr>
+<tr><td>PNG / JPG / WebP</td><td>Always works. Becomes one image layer.</td></tr>
+<tr><td>Photoshop <code>.psd</code></td><td>Layers stay separate.</td></tr>
+<tr><td>Affinity</td><td>Can't be read directly. In Affinity: <b>File → Export → PSD</b>, then import that.</td></tr>
+<tr><td>Illustrator <code>.ai</code> / PDF</td><td>Comes in as one flat image.</td></tr>
+<tr><td><code>kit.json</code> / Kit Forge ZIP</td><td>Reopens a saved kit so you can keep editing.</td></tr>
+</table>
+<p>Use <b>Import</b> in the top bar, or drag files onto the page.</p>
+</section>
+
+<section id="export"><h2>Saving &amp; exporting</h2>
+<table>
+<tr><td><b>Export ZIP</b></td><td>Every card, piece and board as a PNG, a print-and-play sheet, <code>kit.json</code> (your editable save) and a table file for SAGA. <b>This is your hand-in.</b></td></tr>
+<tr><td><b>Print cards</b></td><td>A US Letter sheet with every card at its real size. Print at 100% (not "fit to page").</td></tr>
+<tr><td><b>Send to Table</b></td><td>Downloads a <code>.kittable.json</code> for SAGA.</td></tr>
+</table>
+<div class="tip">To move your work to another computer: Export ZIP → take the ZIP along → <b>Import</b> it there.</div>
+</section>
+
+<section id="table"><h2>Playtesting in SAGA</h2>
+<ol>
+<li>Press <b>Send to Table</b> (or unzip your export and find the <code>.kittable.json</code>).</li>
+<li>Open <a href="https://sagalbcc-production.up.railway.app/">SAGA</a> and join your group's room.</li>
+<li>Drag the file onto the table, or use <b>📦 Load kit…</b>.</li>
+</ol>
+<p>See the <a href="https://sagalbcc-production.up.railway.app/manual.html">SAGA manual</a> for table controls.</p>
+</section>
+
+<section id="keys"><h2>Shortcuts</h2>
+<table>
+<tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd></td><td>Undo</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></td><td>Redo</td></tr>
+<tr><td>Arrow keys</td><td>Nudge the selected layer</td></tr>
+<tr><td><kbd>Delete</kbd></td><td>Delete the selected layer</td></tr>
+</table>
+</section>
+
+<section id="help"><h2>Troubleshooting</h2>
+<table>
+<tr><td>My work is gone</td><td>You're on a different computer or browser, or the browser data was cleared. Import your last ZIP.</td></tr>
+<tr><td>The page looks outdated after an update</td><td>Reload the page twice.</td></tr>
+<tr><td>ZIP export or PSD import does nothing</td><td>They need internet the first time. Check your connection and try again.</td></tr>
+<tr><td>Printed cards are the wrong size</td><td>Set print scale to 100% / "Actual size".</td></tr>
+</table>
+</section>
+</main>
+</body>
+</html>
