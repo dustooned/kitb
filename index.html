@@ -53,10 +53,11 @@
       <div id="canvasArea">
         <div id="canvasStage" class="workspace">
           <div id="toolRow" class="rail glass" role="toolbar" aria-label="Tools" aria-orientation="vertical"></div>
+          <div id="toolOpts" class="tool-opts glass" hidden></div>
           <div id="previewWrap"><div id="previewSvg"></div></div>
           <div id="zoomPill" class="zoom-pill glass" role="group" aria-label="Canvas zoom"></div>
         </div>
-        <p id="previewHint">Click a layer to grab it: drag to move, corners resize, the yellow dot spins. <b>Ctrl + scroll</b> zooms · <b>Space + drag</b> pans · hold <b>Alt</b> to skip snapping.</p>
+        <p id="previewHint">Pick a studio at the top of the tool rail: <b>Layout</b>, <b>Vector</b> or <b>Pixel</b> (1 · 2 · 3). Tools with a corner triangle hold more — press and hold or right-click. <b>Ctrl + scroll</b> zooms · <b>Space + drag</b> pans.</p>
       </div>
     </div>
   </section>
@@ -92,6 +93,8 @@
 </nav>
 
 <div id="ctxMenu" class="ctx-menu" role="menu" hidden></div>
+<div id="toolFly" class="tool-fly" role="menu" hidden></div>
+<input id="toolImage" type="file" accept="image/*,.svg,.psd,.pdf,.ai" hidden>
 <div id="toast" role="status" aria-live="polite"></div>
 
 <script type="module" src="app.js"></script>

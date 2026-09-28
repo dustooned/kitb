@@ -120,6 +120,7 @@ function cleanLayer(L) {
     const vb = Array.isArray(L.vb) && L.vb.length === 4 && L.vb.every(v => Number.isFinite(+v)) && +L.vb[2] > 0 && +L.vb[3] > 0 ? L.vb.map(Number) : null;
     if (svg.length && vb) Object.assign(o, { svg, vb });
     Object.assign(o, { shape: svg.length && vb ? 'custom' : SHAPES.includes(L.shape) ? L.shape : 'rect', fill: hex(L.fill, '#ffda52'), stroke: L.stroke ? hex(L.stroke, '') : '', strokeWidth: clamp(num(L.strokeWidth, 4), 0, 60), radius: clamp(num(L.radius, 16), 0, 400) });
+    if (L.noFill && !L.frame) o.noFill = true;
     if (L.frame && o.shape !== 'line') {
       o.frame = true;
       if (typeof L.img === 'string' && L.img.startsWith('data:image/')) Object.assign(o, {

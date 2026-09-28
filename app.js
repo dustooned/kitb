@@ -114,11 +114,16 @@ function onKeydown(e) {
   if (mod && e.key === '-') { e.preventDefault(); return zoomAt(view.z * 0.8); }
   if (mod && e.key === '0') { e.preventDefault(); return zoomAt(1); }
   if (e.key === ' ') { e.preventDefault(); if (!ui.space) { ui.space = true; setTool(ui.tool); } return; }
-  // Paint-app single-key tools.
+  // Paint-app single-key tools (F / U pick the last-used frame / shape), 1-2-3 switch studio.
   if (!mod && !e.altKey) {
-    const tk = { f: addFrame, v: () => setTool('move'), h: () => setTool('hand'), i: () => $('#toolImage')?.click(), t: addText }[e.key.toLowerCase()];
-    if (tk) { e.preventDefault(); return tk(); }
+    const slotOf = group => { const gi = groupOf(ui.studio, group[0]); return gi >= 0 ? slotTool(ui.studio, gi) : group[0]; };
+    const tk = { v: 'move', h: 'hand', t: 'text', i: 'place', p: 'pen', b: 'brush', e: 'eraser', k: 'picker', f: slotOf(FRAME_GROUP), u: slotOf(SHAPE_GROUP) }[e.key.toLowerCase()];
+    if (tk) { e.preventDefault(); return setTool(tk); }
+    if (['1', '2', '3'].includes(e.key)) { e.preventDefault(); return setStudio(['layout', 'vector', 'pixel'][+e.key - 1]); }
+    if ((ui.tool === 'brush' || ui.tool === 'eraser') && (e.key === '[' || e.key === ']')) { e.preventDefault(); ui.brush.size = clampN(Math.round(ui.brush.size * (e.key === ']' ? 1.25 : 0.8)), 1, 160); saveBrush(); return renderToolOpts(); }
   }
+  if (ui.pen && e.key === 'Escape') { e.preventDefault(); return cancelPen(); }
+  if (ui.pen && e.key === 'Enter') { e.preventDefault(); return finishPen(false); }
   const L = selectedLayer();
   if (!L) return;
   if (e.key === 'Escape' && ui.frameContent) { ui.frameContent = null; renderLayerProps(); updatePreview(); return; }
@@ -152,8 +157,11 @@ function openItem(id) {
   ui.selId = id; ui.tab = it.kind; ui.selLayer = null;
   setScreen('editor'); setMobileView('canvas');
 }
-function createItem(kind, presetId, deckId) {
+function createItem(kind, presetId, deckId, opts = {}) {
   const pre = JSON.stringify(kit), it = newItem(kind, '', presetId);
+  if (opts.name) it.name = opts.name.slice(0, 60);
+  if (opts.w && opts.h && (opts.w !== it.size.w || opts.h !== it.size.h)) { it.size = { w: clampIn(opts.w), h: clampIn(opts.h) }; it.preset = 'custom'; }
+  if (kind === 'piece' && MASKS.includes(opts.mask)) it.mask = opts.mask;
   listFor(kit, kind).push(it); fixOrder(kit);
   if (deckId && deckById(kit, deckId)) placeInDeck(kit, it.id, deckId);
   pushUndo(pre); scheduleSave(); openItem(it.id);
@@ -196,22 +204,12 @@ function bindDocPanel(it) {
 const FRAME_ICO = '<svg class="ico" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="1.5"/><path d="M4 4l16 16M20 4L4 20"/></svg>';
 const SHAPE_ICONS = { rect: '<rect x="4" y="6" width="16" height="12" rx="2"/>', ellipse: '<ellipse cx="12" cy="12" rx="8.5" ry="6.5"/>', triangle: '<path d="M12 4l8.5 15h-17z"/>', star: '<path d="M12 3l2.6 5.6 6 .7-4.5 4.1 1.2 6L12 16.4l-5.3 3 1.2-6-4.5-4.1 6-.7z"/>', line: '<path d="M5 19L19 5"/>' };
 const shapeIco = (s, fill = 'none') => `<svg class="ico" viewBox="0 0 24 24" width="20" height="20" fill="${fill}" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true">${SHAPE_ICONS[s] || SHAPE_ICONS.rect}</svg>`;
-function toolRowHTML() {
-  const b = (attrs, icon, label, title) => `<button type="button" class="tool" ${attrs} title="${title}" aria-label="${title}">${icon}<small>${label}</small></button>`;
-  return b('data-tool="move" aria-pressed="true"', I.move, 'Move', 'Move & select (V)') + b('data-tool="hand" aria-pressed="false"', I.hand, 'Pan', 'Pan the canvas (H, or hold Space)')
-    + '<span class="rail-sep" aria-hidden="true"></span>'
-    + `<label class="tool" title="Add an image, PSD or PDF (I)">${I.image}<small>Image</small><input id="toolImage" type="file" accept="image/*,.svg,.psd,.pdf,.ai" hidden></label>`
-    + b('id="toolText"', I.text, 'Text', 'Add text (T)')
-    + b('id="toolFrame"', FRAME_ICO, 'Frame', 'Add a picture frame (F)')
-    + SHAPES.map(s => b(`data-shape="${s}"`, shapeIco(s), s === 'rect' ? 'Box' : SHAPE_LABELS[s], `Add a ${SHAPE_LABELS[s].toLowerCase()}`)).join('');
-}
 function addLayer(L) {
   const it = selected(); if (!it) return;
   const pre = JSON.stringify(kit);
   it.layers.push(L); ui.selLayer = L.id;
   pushUndo(pre); scheduleSave(); renderLayers(); renderLayerProps(); updatePreview();
 }
-function addFrame() { const it = selected(); if (it) { const { w, h } = docSize(it); addLayer(newFrameLayer(w, h)); toast('Frame added — place an image in it from the panel, or drop one onto it.'); } }
 function toggleFrameContent(L) {
   ui.frameContent = ui.frameContent === L.id ? null : L.id;
   renderLayerProps(); updatePreview();
@@ -223,20 +221,134 @@ async function placeInFrame(file, L) {
   const img = await fileToImage(file), dataUrl = trimAndEncode(img, false), probe = await dataUrlSize(dataUrl);
   Object.assign(L, { frame: true, img: dataUrl, imgW: probe.w, imgH: probe.h, imgFit: 'fill', imgScale: 1, imgX: 0, imgY: 0 });
 }
-function addText() { const it = selected(); if (it) { const { w, h } = docSize(it); addLayer(newTextLayer(w, h)); } }
+// ---------- studios & tools (Affinity v3 style) ----------
+// Three studios share one canvas: Layout (frames, text, placing art), Vector (pen and shapes)
+// and Pixel (paint, erase, pick colours, cut out). Each studio shows only its own tools; tools
+// that are variations of one idea share a slot with a flyout (hold, right-click, or tap the
+// little corner triangle), and the slot remembers the last one you used.
+const svgIco = d => `<svg class="ico" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const FRAME_ICONS = {
+  rect: FRAME_ICO,
+  ellipse: svgIco('<ellipse cx="12" cy="12" rx="8.5" ry="8"/><path d="M6 6l12 12M18 6L6 18"/>'),
+  star: svgIco('<path d="M12 3l2.6 5.6 6 .7-4.5 4.1 1.2 6L12 16.4l-5.3 3 1.2-6-4.5-4.1 6-.7z"/><path d="M9 11l6 4M15 11l-6 4"/>'),
+  triangle: svgIco('<path d="M12 4l8.5 15h-17z"/><path d="M9 13l6 5M15 13l-6 5"/>'),
+};
+const TOOLS = {
+  move: { icon: I.move, label: 'Move', key: 'V', tip: 'Select, move, resize and spin layers' },
+  hand: { icon: I.hand, label: 'Pan', key: 'H', tip: 'Pan the canvas (or hold Space)' },
+  text: { icon: I.text, label: 'Text', key: 'T', tip: 'Click where the text should go', draw: true },
+  place: { icon: I.image, label: 'Place', key: 'I', tip: 'Place an image, SVG, PSD or PDF', action: () => $('#toolImage').click() },
+  pen: { icon: svgIco('<path d="M4 20l3-8 9-9 5 5-9 9z"/><circle cx="11.5" cy="12.5" r="1.4"/>'), label: 'Pen', key: 'P', tip: 'Click points to draw your own shape', draw: true },
+  brush: { icon: svgIco('<path d="M18.5 3.5l2 2-8.5 8.5-2-2z"/><path d="M10 12c-3 0-5 2-5 4.5 0 1.5-1 2.5-2.5 3 4.5.5 9-1 9-5.5"/>'), label: 'Brush', key: 'B', tip: 'Paint (Alt-click picks a colour)', draw: true },
+  eraser: { icon: svgIco('<path d="M3.5 16.5l9-9 7 7-5 5H7.5z"/><path d="M14 20.5h7M8 11.5l7 7"/>'), label: 'Eraser', key: 'E', tip: 'Erase pixels from a picture or paint layer', draw: true },
+  picker: { icon: svgIco('<path d="M20 4.5a2.1 2.1 0 00-3 0l-3 3-1-1-1.5 1.5 5 5 1.5-1.5-1-1 3-3a2.1 2.1 0 000-3z"/><path d="M12 9l-7.5 7.5V20H8l7.5-7.5"/>'), label: 'Colour', key: 'K', tip: 'Click the canvas to pick a colour', draw: true },
+  cutout: { icon: I.wand, label: 'Cut out', tip: 'Remove the background from the selected picture', action: () => { const L = selectedLayer(); if (L?.kind === 'image') cutOut(L); else toast('Select a picture first, then Cut out removes its background.'); } },
+};
+for (const s of SHAPES) TOOLS['shape-' + s] = { icon: shapeIco(s), label: s === 'rect' ? 'Rectangle' : SHAPE_LABELS[s], short: 'Shape', key: 'U', tip: 'Drag to draw · Shift keeps it square', draw: true, shape: s };
+for (const s of ['rect', 'ellipse', 'star', 'triangle']) TOOLS['frame-' + s] = { icon: FRAME_ICONS[s], label: `${s === 'rect' ? 'Rectangle' : SHAPE_LABELS[s]} frame`, short: 'Frame', key: 'F', tip: 'Drag to draw a picture frame', draw: true, shape: s, frame: true };
+const SHAPE_GROUP = SHAPES.map(s => 'shape-' + s), FRAME_GROUP = ['frame-rect', 'frame-ellipse', 'frame-star', 'frame-triangle'];
+const STUDIOS = {
+  layout: { label: 'Layout', tip: 'Layout: frames, text and placing art', icon: svgIco('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M10 9v11"/>'), groups: [['move'], ['hand'], FRAME_GROUP, ['text'], ['place'], SHAPE_GROUP] },
+  vector: { label: 'Vector', tip: 'Vector: pen and crisp shapes', icon: svgIco('<path d="M12 3l6 9-6 9-6-9z"/><circle cx="12" cy="12" r="1.6"/><path d="M12 3v7.4"/>'), groups: [['move'], ['hand'], ['pen'], SHAPE_GROUP, ['text'], ['place']] },
+  pixel: { label: 'Pixel', tip: 'Pixel: paint, erase, pick colours, cut out', icon: TOOLS.brush.icon, groups: [['move'], ['hand'], ['brush'], ['eraser'], ['picker'], ['place'], ['cutout']] },
+};
+const lsGet = k => { try { return localStorage.getItem(k); } catch { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { } };
+ui.studio = STUDIOS[lsGet('kf-studio')] ? lsGet('kf-studio') : 'layout';
+ui.slot = (() => { try { return JSON.parse(lsGet('kf-slots') || '{}'); } catch { return {}; } })();
+ui.brush = (() => { try { return { color: '#171724', size: 14, opacity: 1, ...JSON.parse(lsGet('kf-brush') || '{}') }; } catch { return { color: '#171724', size: 14, opacity: 1 }; } })();
+const saveBrush = () => lsSet('kf-brush', JSON.stringify(ui.brush));
+const groupOf = (studio, tool) => STUDIOS[studio].groups.findIndex(g => g.includes(tool));
+function slotTool(studio, gi) { const g = STUDIOS[studio].groups[gi], t = ui.slot[`${studio}:${gi}`]; return g.includes(t) ? t : g[0]; }
+
+function renderRail() {
+  const S = STUDIOS[ui.studio];
+  $('#toolRow').innerHTML = `<div class="studio-switch" role="group" aria-label="Studio">${Object.entries(STUDIOS).map(([k, s]) => `<button type="button" data-studio="${k}" aria-pressed="${ui.studio === k}" title="${s.tip}" aria-label="${s.label} studio">${s.icon}</button>`).join('')}</div>
+    <div class="studio-name">${S.label}</div>`
+    + S.groups.map((g, gi) => {
+      const id = slotTool(ui.studio, gi), t = TOOLS[id], fly = g.length > 1;
+      return `${gi === 2 ? '<span class="rail-sep" aria-hidden="true"></span>' : ''}<button type="button" class="tool${fly ? ' has-fly' : ''}" data-tool="${id}" data-group="${gi}" aria-pressed="${ui.tool === id}" title="${t.label}${t.key ? ` (${t.key})` : ''} — ${t.tip}${fly ? ' · hold for more' : ''}" aria-label="${t.label}">${t.icon}<small>${t.short || t.label}</small>${fly ? '<i class="fly-tri" data-fly aria-hidden="true"></i>' : ''}</button>`;
+    }).join('');
+  $('#canvasStage').classList.toggle('draw', !!TOOLS[ui.tool]?.draw);
+}
+function setStudio(s) {
+  if (!STUDIOS[s]) return;
+  ui.studio = s; lsSet('kf-studio', s);
+  if (groupOf(s, ui.tool) < 0) ui.tool = 'move';
+  cancelPen(); renderRail(); renderToolOpts();
+}
+function setTool(name) {
+  const t = TOOLS[name]; if (!t) return;
+  if (t.action) return t.action();
+  if (groupOf(ui.studio, name) < 0) { const s = Object.keys(STUDIOS).find(k => groupOf(k, name) >= 0); if (s) { ui.studio = s; lsSet('kf-studio', s); } }
+  const gi = groupOf(ui.studio, name); if (gi >= 0) { ui.slot[`${ui.studio}:${gi}`] = name; lsSet('kf-slots', JSON.stringify(ui.slot)); }
+  if (name !== 'pen') cancelPen();
+  ui.tool = name;
+  $('#canvasStage').classList.toggle('hand', name === 'hand' || ui.space);
+  renderRail(); renderToolOpts();
+}
+function openFlyout(btn) {
+  const gi = +btn.dataset.group, g = STUDIOS[ui.studio].groups[gi], fly = $('#toolFly'), r = btn.getBoundingClientRect();
+  fly.innerHTML = g.map(id => `<button type="button" data-pick="${id}" aria-pressed="${ui.tool === id}">${TOOLS[id].icon}<span>${TOOLS[id].label}</span>${TOOLS[id].key ? `<kbd>${TOOLS[id].key}</kbd>` : ''}</button>`).join('');
+  fly.hidden = false;
+  const fr = fly.getBoundingClientRect();
+  fly.style.left = Math.min(r.right + 8, innerWidth - fr.width - 8) + 'px';
+  fly.style.top = Math.max(8, Math.min(r.top, innerHeight - fr.height - 8)) + 'px';
+}
+const closeFly = () => { $('#toolFly').hidden = true; };
+
+// The little bar over the canvas that shows the current tool's options (like Affinity's
+// context toolbar). Empty for Move / Pan.
+function renderToolOpts() {
+  const box = $('#toolOpts'), t = ui.tool, b = ui.brush;
+  const note = s => `<span class="to-note">${s}</span>`;
+  let html = '';
+  if (t === 'brush' || t === 'eraser') html = `${t === 'brush' ? `<label class="to-color" title="Brush colour"><input type="color" data-bk="color" value="${esc(b.color)}" aria-label="Brush colour"></label>` : ''}
+    <label class="sl to-sl"><span>Size</span><input type="range" data-bk="size" min="1" max="160" step="1" value="${b.size}"><output>${b.size}</output></label>
+    ${t === 'brush' ? `<label class="sl to-sl"><span>Opacity</span><input type="range" data-bk="opacity" min="0.05" max="1" step="0.05" value="${b.opacity}"><output>${Math.round(b.opacity * 100)}%</output></label>` : ''}
+`;
+  else if (t === 'picker') html = `<span class="to-chip" style="--c:${esc(b.color)}"></span>${note('Click the canvas to pick a colour for the brush')}`;
+  else if (t === 'pen') html = note(ui.pen?.pts.length ? `${ui.pen.pts.length} point${ui.pen.pts.length === 1 ? '' : 's'} · click the first point to close · <b>Enter</b> finishes an open line · <b>Esc</b> cancels` : 'Click to add points. Click the first point again to close the shape.');
+  else if (t === 'text') html = note('Click where the text should go');
+  else if (TOOLS[t]?.shape) html = note(`Drag to draw ${TOOLS[t].frame ? 'a frame' : 'the shape'} · <b>Shift</b> keeps it even · just click for a default size`);
+  box.title = t === 'brush' ? 'Paints on the selected picture, or on a new Paint layer. Alt-click picks a colour; [ and ] change the size.' : t === 'eraser' ? 'Erases from the selected picture or paint layer. [ and ] change the size.' : '';
+  box.innerHTML = html; box.hidden = !html;
+}
 function bindToolRow() {
-  $('#toolRow').addEventListener('click', e => {
-    const t = e.target.closest('[data-tool]'); if (t) return setTool(t.dataset.tool);
-    const s = e.target.closest('[data-shape]'); if (!s) return;
-    const it = selected(); if (!it) return;
-    const { w, h } = docSize(it); addLayer(newShapeLayer(s.dataset.shape, w, h));
+  const rail = $('#toolRow');
+  let hold = null;
+  rail.addEventListener('pointerdown', e => {
+    const btn = e.target.closest('.has-fly'); if (!btn) return;
+    hold = setTimeout(() => { hold = 'opened'; openFlyout(btn); }, 380);
   });
-  $('#toolText').addEventListener('click', addText);
-  $('#toolFrame').addEventListener('click', addFrame);
+  const stopHold = () => { if (hold && hold !== 'opened') clearTimeout(hold); };
+  rail.addEventListener('pointerup', stopHold); rail.addEventListener('pointerleave', stopHold);
+  rail.addEventListener('click', e => {
+    if (hold === 'opened') { hold = null; return; }
+    hold = null;
+    const st = e.target.closest('[data-studio]'); if (st) return setStudio(st.dataset.studio);
+    const btn = e.target.closest('[data-tool]'); if (!btn) return;
+    if (e.target.closest('[data-fly]')) return openFlyout(btn);
+    setTool(btn.dataset.tool);
+  });
+  rail.addEventListener('contextmenu', e => { const btn = e.target.closest('.has-fly'); if (btn) { e.preventDefault(); openFlyout(btn); } });
+  $('#toolFly').addEventListener('click', e => { const b = e.target.closest('[data-pick]'); if (b) { closeFly(); setTool(b.dataset.pick); } });
+  addEventListener('pointerdown', e => { if (!$('#toolFly').hidden && !e.target.closest('#toolFly, .has-fly')) closeFly(); });
+  $('#toolOpts').addEventListener('input', e => {
+    const k = e.target.dataset.bk; if (!k) return;
+    ui.brush[k] = k === 'color' ? e.target.value : +e.target.value; saveBrush();
+    const out = e.target.parentElement.querySelector('output'); if (out) out.textContent = k === 'opacity' ? Math.round(ui.brush.opacity * 100) + '%' : ui.brush[k];
+  });
   // Double-click a filled frame to move the picture inside it (and again to stop).
   $('#previewSvg').addEventListener('dblclick', e => {
+    if (ui.tool === 'pen') return finishPen(false);
     const L = selectedLayer(); if (!L?.frame || !L.img || !e.target.closest(`[data-layer="${L.id}"]`)) return;
     toggleFrameContent(L);
+  });
+  $('#previewSvg').addEventListener('pointermove', e => {
+    if (ui.tool !== 'pen' || !ui.pen) return;
+    const m = document.querySelector('#previewSvg svg')?.getScreenCTM(); if (!m) return;
+    const p = new DOMPoint(e.clientX, e.clientY).matrixTransform(m.inverse()); ui.pen.hover = [p.x, p.y]; drawPen();
   });
   $('#toolImage').addEventListener('change', async e => {
     const f = e.target.files[0]; if (!f) return;
@@ -246,15 +358,163 @@ function bindToolRow() {
   $('#zoomPill').innerHTML = `<button type="button" data-z="out" title="Zoom out (Ctrl −)" aria-label="Zoom out">${I.minus}</button><button type="button" id="zoomPct" data-z="fit" title="Fit (Ctrl 0)">100%</button><button type="button" data-z="in" title="Zoom in (Ctrl +)" aria-label="Zoom in">${I.plus}</button>`;
   $('#zoomPill').addEventListener('click', e => { const z = e.target.closest('[data-z]')?.dataset.z; if (z) zoomAt(z === 'fit' ? 1 : view.z * (z === 'in' ? 1.25 : 0.8)); });
   $('#canvasStage').addEventListener('wheel', e => {
-    const it = selected(); if (!it || e.target.closest('.rail, .zoom-pill')) return;
+    const it = selected(); if (!it || e.target.closest('.rail, .zoom-pill, .tool-opts')) return;
     if (e.ctrlKey || e.metaKey) { e.preventDefault(); zoomAt(view.z * Math.exp(-e.deltaY * 0.0025), e.clientX, e.clientY); }
     else if (view.z > 1) { e.preventDefault(); const k = metrics().k; view.cx += e.deltaX / k; view.cy += e.deltaY / k; applyViewBox(); }
   }, { passive: false });
 }
-function setTool(name) {
-  ui.tool = name;
-  document.querySelectorAll('#toolRow [data-tool]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.tool === name)));
-  $('#canvasStage').classList.toggle('hand', name === 'hand' || ui.space);
+
+// ---------- drawing tools on the canvas ----------
+const unitsPerPx = () => { const it = selected(); return it && view.px ? (docSize(it).w / view.z) / view.px : 1; };
+function startToolGesture(e, it, toDoc) {
+  e.preventDefault();
+  let t = ui.tool;
+  const [x0, y0] = toDoc(e); if (!Number.isFinite(x0)) return;
+  if (t === 'brush' && e.altKey) t = 'picker';
+  if (t === 'picker') return pickColor(it, x0, y0);
+  if (t === 'pen') return penClick(x0, y0);
+  if (t === 'brush' || t === 'eraser') return paintStroke(it, toDoc, x0, y0, t === 'eraser');
+  if (t === 'text') {
+    const { w, h } = docSize(it), L = newTextLayer(w, h); Object.assign(L, { x: x0, y: y0 });
+    addLayer(L); setTool('move');
+    return setTimeout(() => { const ta = lp.querySelector('[data-k="text"]'); ta?.focus(); ta?.select(); }, 30);
+  }
+  const spec = TOOLS[t]; if (!spec?.shape) return;
+  const pre = JSON.stringify(kit), { w: dw, h: dh } = docSize(it);
+  const make = () => {
+    const L = spec.frame ? newFrameLayer(dw, dh) : newShapeLayer(spec.shape, dw, dh);
+    if (spec.frame) Object.assign(L, { shape: spec.shape, name: TOOLS[t].label });
+    if (spec.shape === 'line') Object.assign(L, { fill: '#171724', strokeWidth: 6 });
+    return L;
+  };
+  let L = null;
+  trackGesture(ev => {
+    const [x1, y1] = toDoc(ev);
+    if (!L && Math.hypot(x1 - x0, y1 - y0) < 4 * unitsPerPx()) return;
+    if (!L) { L = make(); it.layers.push(L); ui.selLayer = L.id; }
+    shapeFromDrag(L, x0, y0, x1, y1, ev.shiftKey);
+    updatePreview();
+  }, () => {
+    if (!L) { L = make(); Object.assign(L, { x: x0, y: y0 }); it.layers.push(L); ui.selLayer = L.id; }
+    pushUndo(pre); scheduleSave(); setTool('move'); renderLayers(); renderLayerProps(); updatePreview();
+  });
+}
+function shapeFromDrag(L, x0, y0, x1, y1, even) {
+  if (L.shape === 'line' && !L.frame) {
+    let a = Math.atan2(y1 - y0, x1 - x0) * 180 / Math.PI; if (even) a = Math.round(a / 15) * 15;
+    const len = Math.max(2, Math.hypot(x1 - x0, y1 - y0));
+    return Object.assign(L, { x: x0 + Math.cos(a * Math.PI / 180) * len / 2, y: y0 + Math.sin(a * Math.PI / 180) * len / 2, w: len, h: Math.max(8, L.strokeWidth * 2), rot: a, scale: 1 });
+  }
+  let w = x1 - x0, h = y1 - y0;
+  if (even) { const m = Math.max(Math.abs(w), Math.abs(h)); w = Math.sign(w || 1) * m; h = Math.sign(h || 1) * m; }
+  Object.assign(L, { x: x0 + w / 2, y: y0 + h / 2, w: Math.max(2, Math.abs(w)), h: Math.max(2, Math.abs(h)), scale: 1, rot: 0 });
+}
+
+// Pen: click points; click the first point to close (filled shape), Enter / double-click to
+// finish an open line (stroke only), Esc to cancel. Becomes a regular custom shape layer.
+function penClick(x, y) {
+  ui.pen ||= { pts: [] };
+  const p = ui.pen.pts;
+  if (p.length >= 3 && Math.hypot(x - p[0][0], y - p[0][1]) < 12 * unitsPerPx()) return finishPen(true);
+  p.push([x, y]); drawPen(); renderToolOpts();
+}
+function cancelPen() { if (ui.pen) { ui.pen = null; drawPen(); renderToolOpts(); } }
+function finishPen(close) {
+  const pts = ui.pen?.pts || []; ui.pen = null; drawPen(); renderToolOpts();
+  if (pts.length < 2) return;
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]), minX = Math.min(...xs), minY = Math.min(...ys);
+  const w = Math.max(1, Math.max(...xs) - minX), h = Math.max(1, Math.max(...ys) - minY);
+  const d = 'M' + pts.map(([x, y]) => `${(x - minX).toFixed(1)} ${(y - minY).toFixed(1)}`).join(' L') + (close ? ' Z' : '');
+  const L = { ...newShapeLayer('rect', 10, 10), name: close ? 'Pen shape' : 'Pen line', shape: 'custom', svg: [{ tag: 'path', a: { d } }], vb: [0, 0, w, h], x: minX + w / 2, y: minY + h / 2, w, h };
+  if (!close) Object.assign(L, { noFill: true, stroke: '#171724', strokeWidth: 5 });
+  addLayer(L); setTool('move');
+}
+function drawPen() {
+  const g = document.querySelector('#previewSvg #guides'); if (!g) return;
+  if (!ui.pen?.pts.length) { if (g.dataset.pen) { g.innerHTML = ''; delete g.dataset.pen; } return; }
+  const u = unitsPerPx(), pts = ui.pen.pts, all = ui.pen.hover ? [...pts, ui.pen.hover] : pts;
+  g.dataset.pen = '1';
+  g.innerHTML = `<polyline points="${all.map(p => p.map(v => v.toFixed(1)).join(',')).join(' ')}" fill="rgba(47,123,255,.08)" stroke="#2f7bff" stroke-width="${(2 * u).toFixed(2)}" stroke-dasharray="${(6 * u).toFixed(1)} ${(4 * u).toFixed(1)}"/>`
+    + pts.map((p, i) => `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="${((i ? 4 : 7) * u).toFixed(1)}" fill="${i ? '#fff' : '#2f7bff'}" stroke="#2f7bff" stroke-width="${(2 * u).toFixed(2)}"/>`).join('');
+}
+
+// Pixel tools. Paint happens on a real <canvas> the size of the picture; the stroke is drawn on
+// its own canvas and composited at the brush opacity, so overlapping dabs don't build up.
+const paintCache = new Map();
+async function paintCanvas(L) {
+  const c = paintCache.get(L.id); if (c?.asset === L.asset) return c.canvas;
+  const img = new Image(); img.src = L.asset; await img.decode();
+  const cv = document.createElement('canvas'); cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+  cv.getContext('2d').drawImage(img, 0, 0);
+  paintCache.set(L.id, { asset: L.asset, canvas: cv });
+  return cv;
+}
+function paintTarget(it, create) {
+  const S = selectedLayer();
+  if (S && S.kind === 'image' && !S.vector && !S.locked && !S.hidden) return S;
+  if (!create) return null;
+  const { w, h } = docSize(it), k = Math.min(1, 1600 / Math.max(w, h));
+  const cv = document.createElement('canvas'); cv.width = Math.round(w * k); cv.height = Math.round(h * k);
+  const L = newImageLayer(cv.toDataURL('image/png'), w / 2, h / 2, w, h, 'Paint');
+  it.layers.push(L); ui.selLayer = L.id;
+  paintCache.set(L.id, { asset: L.asset, canvas: cv });
+  renderLayers(); renderLayerProps(); updatePreview();
+  return L;
+}
+function paintStroke(it, toDoc, x0, y0, erase) {
+  const pre = JSON.stringify(kit), L = paintTarget(it, !erase);
+  if (!L) return toast('Select a picture or paint layer to erase from.');
+  const pts = [[x0, y0]];
+  let cv = null, base = null, stroke = null, sctx = null, drawn = 0, frame = 0, ended = false;
+  const toPx = (x, y) => {
+    const r = (L.rot || 0) * Math.PI / 180, dx = x - L.x, dy = y - L.y;
+    const lx = (dx * Math.cos(r) + dy * Math.sin(r)) / L.scale, ly = (-dx * Math.sin(r) + dy * Math.cos(r)) / L.scale;
+    const s = Math.max(L.w / cv.width, L.h / cv.height); // image layers "slice" into their box
+    return [lx / s + cv.width / 2, ly / s + cv.height / 2, s];
+  };
+  const render = () => {
+    frame = 0;
+    const g = cv.getContext('2d');
+    for (; drawn < pts.length; drawn++) {
+      const [x, y, s] = toPx(...pts[drawn]), prev = drawn ? toPx(...pts[drawn - 1]) : null;
+      sctx.lineWidth = Math.max(1, ui.brush.size / (L.scale * s));
+      sctx.beginPath();
+      if (prev) { sctx.moveTo(prev[0], prev[1]); sctx.lineTo(x, y); sctx.stroke(); }
+      else { sctx.arc(x, y, sctx.lineWidth / 2, 0, Math.PI * 2); sctx.fill(); }
+    }
+    g.globalCompositeOperation = 'copy'; g.globalAlpha = 1; g.drawImage(base, 0, 0);
+    g.globalCompositeOperation = erase ? 'destination-out' : 'source-over'; g.globalAlpha = erase ? 1 : ui.brush.opacity;
+    g.drawImage(stroke, 0, 0);
+    g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1;
+    cv.toBlob(b => { if (!b) return; const url = URL.createObjectURL(b), el = document.querySelector(`#previewSvg [data-layer="${L.id}"] image`); if (el) { const old = el.getAttribute('href'); el.setAttribute('href', url); if (old?.startsWith('blob:') && old !== liveHrefs.get(L.asset)) setTimeout(() => URL.revokeObjectURL(old), 500); } });
+  };
+  const queue = () => { if (cv && !frame) frame = requestAnimationFrame(render); };
+  paintCanvas(L).then(c => {
+    cv = c;
+    base = document.createElement('canvas'); base.width = cv.width; base.height = cv.height; base.getContext('2d').drawImage(cv, 0, 0);
+    stroke = document.createElement('canvas'); stroke.width = cv.width; stroke.height = cv.height;
+    sctx = stroke.getContext('2d'); Object.assign(sctx, { lineCap: 'round', lineJoin: 'round', strokeStyle: ui.brush.color, fillStyle: ui.brush.color });
+    queue(); if (ended) finish();
+  }).catch(() => toast("Couldn't paint on that picture."));
+  const finish = () => {
+    if (!cv) return;
+    if (frame) cancelAnimationFrame(frame); render();
+    L.asset = cv.toDataURL('image/png'); paintCache.set(L.id, { asset: L.asset, canvas: cv });
+    pushUndo(pre); scheduleSave(); renderLayers(); updatePreview();
+  };
+  trackGesture(ev => { pts.push(toDoc(ev)); queue(); }, () => { ended = true; finish(); });
+}
+async function pickColor(it, x, y) {
+  const { w, h } = docSize(it), img = new Image();
+  img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(itemSVG(it, 'pk'));
+  try { await img.decode(); } catch { return toast("Couldn't read colours from this canvas."); }
+  const cv = document.createElement('canvas'); cv.width = Math.round(w); cv.height = Math.round(h);
+  const g = cv.getContext('2d', { willReadFrequently: true }); g.drawImage(img, 0, 0, cv.width, cv.height);
+  const d = g.getImageData(clampN(Math.round(x), 0, cv.width - 1), clampN(Math.round(y), 0, cv.height - 1), 1, 1).data;
+  if (d[3] < 8) return toast('Nothing to pick there.');
+  ui.brush.color = '#' + [d[0], d[1], d[2]].map(v => v.toString(16).padStart(2, '0')).join(''); saveBrush();
+  if (ui.tool === 'picker') setTool('brush'); else renderToolOpts();
+  toast(`Brush colour ${ui.brush.color}`);
 }
 
 // ---------- canvas zoom & pan ----------
@@ -546,7 +806,8 @@ function renderEditor() {
   $('#docPanel').innerHTML = docPanelHTML(it);
   bindDocPanel(it);
   const toolRow = $('#toolRow');
-  if (!toolRow.dataset.bound) { toolRow.innerHTML = toolRowHTML(); bindToolRow(); toolRow.dataset.bound = '1'; }
+  if (!toolRow.dataset.bound) { bindToolRow(); toolRow.dataset.bound = '1'; }
+  renderRail(); renderToolOpts();
   renderLayers();
   renderLayerProps();
   updatePreview();
@@ -580,6 +841,7 @@ function updatePreview() {
   el.style.touchAction = 'none';
   el.addEventListener('pointerdown', e => onCanvasPointerDown(e, it, el));
   applyViewBox();
+  if (ui.pen) drawPen();
   const px = el.getBoundingClientRect().width;
   if (px && Math.abs(px - view.px) > 1) { view.px = px; updatePreview(); }
 }
@@ -635,6 +897,7 @@ function onCanvasPointerDown(e, it, el) {
   };
   // Pan: the hand tool, Space, the middle button, or dragging empty space while zoomed in.
   const panning = ui.tool === 'hand' || ui.space || e.button === 1;
+  if (!panning && e.button === 0 && TOOLS[ui.tool]?.draw) return startToolGesture(e, it, toDoc);
   if (panning || (!handle && !layerEl && view.z > 1)) {
     e.preventDefault();
     if (!panning && ui.selLayer) { ui.selLayer = null; renderLayers(); renderLayerProps(); updatePreview(); }

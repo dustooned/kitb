@@ -6,7 +6,7 @@
 import { esc, itemSVG } from './render.js';
 import {
   itemById, deckById, deckItems, placeTop, placeInDeck, newDeckFrom, ungroupDeck, dropEmptyDecks,
-  deleteItems, duplicateItem, reorderSubset, SIZE_PRESETS, DEFAULT_COLORS,
+  deleteItems, duplicateItem, reorderSubset, SIZE_PRESETS, DEFAULT_COLORS, MASKS, MASK_LABELS, MIN_IN, MAX_IN,
 } from './model.js';
 import { I } from './icons.js';
 
@@ -114,7 +114,7 @@ function startDrag(tile, x, y, touch) {
   drag = { key: tile.dataset.key, tile, ghost, touch, container: tile.parentElement, scope: tile.closest('#deckGrid') ? 'deck' : 'top',
     ox: x - r.left, oy: y - r.top, left: r.left, top: r.top, x0: x, y0: y, moved: false, merge: null, pre: JSON.stringify(G.kit()) };
   document.body.classList.add('g-dragging');
-  navigator.vibrate?.(8);
+  if (navigator.userActivation?.hasBeenActive) navigator.vibrate?.(8);
 }
 function dragMove(x, y) {
   const d = drag; if (!d) return;
@@ -273,18 +273,46 @@ function selAction(a, btn) {
   }
 }
 
-// ---------- new item sheet ----------
-function newSheet() {
-  const kind = st.filter === 'all' ? 'card' : st.filter;
-  const box = (p, k) => { const s = 34 / Math.max(p.w, p.h); return `<span class="ns-shape ${k}" style="width:${Math.max(10, p.w * s)}px;height:${Math.max(10, p.h * s)}px"></span>`; };
-  $('#newSheet').innerHTML = `<div class="ns-panel glass" role="dialog" aria-label="Make something new">
-    <div class="ns-head"><b>New</b><span class="spacer"></span><button type="button" class="lp-ic" data-ns="close" aria-label="Close">${I.close}</button></div>
-    ${Object.entries(KIND).map(([k, label]) => `<div class="ns-row"><div class="ns-kind">${label}</div><div class="ns-opts">
-      ${SIZE_PRESETS[k].filter(p => p.id !== 'custom').map(p => `<button type="button" data-ns="${k}:${p.id}" class="${k === kind && p === SIZE_PRESETS[k][0] ? 'first' : ''}">${box(p, k)}<span>${esc(p.label.replace(/\s*\(.*\)/, ''))}</span><small>${esc((p.label.match(/\((.*)\)/) || [])[1] || '')}</small></button>`).join('')}
-    </div></div>`).join('')}
-    <p class="g-note">Custom sizes: pick any, then change it under ⚙ in the editor.${st.deck ? ' It goes into the open deck.' : ''}</p></div>`;
+// ---------- New dialog ----------
+// A standard "New document" dialog: pick Card / Piece / Board, pick a size from a short list
+// (or type your own), flip orientation, name it, Create. Double-clicking a size creates it
+// straight away.
+const nd = { kind: 'card', preset: '', w: 2.5, h: 3.5, name: '', mask: 'circle' };
+const presetsOf = kind => SIZE_PRESETS[kind].filter(p => p.id !== 'custom');
+function pickPreset(p) { Object.assign(nd, { preset: p.id, w: p.w, h: p.h }); }
+function newSheet(kind = st.filter === 'all' ? nd.kind : st.filter) {
+  if (kind !== nd.kind || !nd.preset) { nd.kind = kind; pickPreset(presetsOf(kind)[0]); }
+  nd.name = '';
+  renderNewSheet();
   $('#newSheet').hidden = false;
-  $('#newSheet .first')?.focus();
+  $('#newSheet [data-np].on')?.focus();
+}
+function renderNewSheet() {
+  const shape = (w, h, big) => { const s = (big ? 120 : 30) / Math.max(w, h); return `<span class="ns-shape ${nd.kind}${nd.kind === 'piece' ? ' m-' + nd.mask : ''}" style="width:${Math.max(big ? 24 : 8, w * s)}px;height:${Math.max(big ? 24 : 8, h * s)}px"></span>`; };
+  const dims = p => `${p.w} × ${p.h} in`;
+  $('#newSheet').innerHTML = `<div class="ns-panel glass" role="dialog" aria-label="New">
+    <div class="ns-head"><b>New</b><span class="spacer"></span><button type="button" class="lp-ic" data-ns="close" aria-label="Close">${I.close}</button></div>
+    <div class="seg-soft ns-kinds" role="tablist">${Object.entries(KIND).map(([k, label]) => `<button type="button" role="tab" data-nk="${k}" aria-selected="${nd.kind === k}" aria-pressed="${nd.kind === k}">${label}</button>`).join('')}</div>
+    <div class="ns-body">
+      <div class="ns-list" role="listbox" aria-label="Size">${presetsOf(nd.kind).map(p => `<button type="button" role="option" data-np="${p.id}" class="${nd.preset === p.id ? 'on' : ''}" aria-selected="${nd.preset === p.id}">${shape(p.w, p.h)}<span>${esc(p.label.replace(/\s*\(.*\)/, ''))}</span><small>${dims(p)}</small></button>`).join('')}</div>
+      <div class="ns-side">
+        <div class="ns-preview">${shape(nd.w, nd.h, true)}</div>
+        <label class="ns-f">Name<input data-nf="name" type="text" maxlength="60" placeholder="New ${nd.kind}" value="${esc(nd.name)}"></label>
+        <div class="ns-dims"><label class="ns-f">Width<input data-nf="w" type="number" min="${MIN_IN}" max="${MAX_IN}" step="0.05" value="${nd.w}"></label>
+          <button type="button" class="lp-ic" data-ns="swap" title="Swap width and height" aria-label="Swap width and height">⇄</button>
+          <label class="ns-f">Height<input data-nf="h" type="number" min="${MIN_IN}" max="${MAX_IN}" step="0.05" value="${nd.h}"></label><span class="ns-unit">in</span></div>
+        ${nd.kind === 'piece' ? `<label class="ns-f">Shape<select data-nf="mask">${MASKS.filter(m => m !== 'none').map(m => `<option value="${m}" ${m === nd.mask ? 'selected' : ''}>${MASK_LABELS[m]}</option>`).join('')}</select></label>` : ''}
+        <button type="button" class="dk-btn accent ns-create" data-ns="create">Create</button>
+        ${st.deck ? '<p class="g-note">Goes into the open deck.</p>' : ''}
+      </div>
+    </div></div>`;
+}
+function createFromSheet() {
+  $('#newSheet').hidden = true;
+  const deckId = st.deck;
+  if (deckId) { st.deck = null; $('#deckOverlay').hidden = true; }
+  const w = Math.min(MAX_IN, Math.max(MIN_IN, +nd.w || 1)), h = Math.min(MAX_IN, Math.max(MIN_IN, +nd.h || 1));
+  G.create(nd.kind, nd.preset || presetsOf(nd.kind)[0].id, deckId, { w, h, name: nd.name.trim(), mask: nd.mask });
 }
 
 // ---------- wiring ----------
@@ -293,7 +321,9 @@ export function initGallery(ctx) {
   bindDrag($('#gGrid')); bindDrag($('#deckGrid'));
   $('#gChips').addEventListener('click', e => { const b = e.target.closest('[data-filter]'); if (b) { st.filter = b.dataset.filter; renderGallery(); } });
   $('#gSelect').addEventListener('click', () => { st.selecting = !st.selecting; st.picked.clear(); renderGallery(); });
-  $('#gNew').addEventListener('click', newSheet);
+  $('#gNew').addEventListener('click', () => newSheet());
+  // The + tile is skipped by the drag code (it isn't draggable), so it needs its own click.
+  $('#gGrid').addEventListener('click', e => { if (e.target.closest('[data-new]')) newSheet(); });
   $('#gSelbar').addEventListener('click', e => { const b = e.target.closest('[data-sel]'); if (b && !b.disabled) selAction(b.dataset.sel, b); });
   $('#deckOverlay').addEventListener('click', e => {
     if (e.target.id === 'deckOverlay') return closeDeck();
@@ -310,15 +340,26 @@ export function initGallery(ctx) {
     if (d && n && n !== d.name) G.commit(() => { d.name = n; });
   });
   $('#deckOverlay').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'deckName') e.target.blur(); });
-  $('#newSheet').addEventListener('click', e => {
-    if (e.target.id === 'newSheet') { $('#newSheet').hidden = true; return; }
+  const sheet = $('#newSheet');
+  sheet.addEventListener('click', e => {
+    if (e.target === sheet) { sheet.hidden = true; return; }
+    const k = e.target.closest('[data-nk]'); if (k) { nd.kind = k.dataset.nk; pickPreset(presetsOf(nd.kind)[0]); return renderNewSheet(); }
+    const p = e.target.closest('[data-np]'); if (p) { pickPreset(presetsOf(nd.kind).find(x => x.id === p.dataset.np)); renderNewSheet(); return $(`#newSheet [data-np="${nd.preset}"]`)?.focus(); }
     const b = e.target.closest('[data-ns]'); if (!b) return;
-    $('#newSheet').hidden = true;
-    if (b.dataset.ns === 'close') return;
-    const [kind, preset] = b.dataset.ns.split(':'), deckId = st.deck;
-    if (deckId) { st.deck = null; $('#deckOverlay').hidden = true; }
-    G.create(kind, preset, deckId);
+    if (b.dataset.ns === 'close') sheet.hidden = true;
+    if (b.dataset.ns === 'swap') { [nd.w, nd.h] = [nd.h, nd.w]; nd.preset = presetsOf(nd.kind).find(x => x.w === nd.w && x.h === nd.h)?.id || ''; renderNewSheet(); }
+    if (b.dataset.ns === 'create') createFromSheet();
   });
+  sheet.addEventListener('dblclick', e => { if (e.target.closest('[data-np]')) createFromSheet(); });
+  sheet.addEventListener('input', e => {
+    const f = e.target.dataset.nf; if (!f) return;
+    nd[f] = f === 'w' || f === 'h' ? +e.target.value : e.target.value;
+    if (f === 'w' || f === 'h') { nd.preset = presetsOf(nd.kind).find(x => x.w === nd.w && x.h === nd.h)?.id || ''; for (const b of sheet.querySelectorAll('[data-np]')) b.classList.toggle('on', b.dataset.np === nd.preset); }
+    if (f === 'mask') renderNewSheet();
+    const prev = sheet.querySelector('.ns-preview');
+    if (prev && f !== 'name') { const s2 = 120 / Math.max(nd.w || 1, nd.h || 1); prev.firstElementChild.style.width = Math.max(24, (nd.w || 1) * s2) + 'px'; prev.firstElementChild.style.height = Math.max(24, (nd.h || 1) * s2) + 'px'; }
+  });
+  sheet.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.target.closest('[data-ns], [data-nk]')) { e.preventDefault(); createFromSheet(); } });
   addEventListener('keydown', e => {
     if (e.key !== 'Escape' || document.body.dataset.screen !== 'gallery') return;
     if (!$('#newSheet').hidden) $('#newSheet').hidden = true;

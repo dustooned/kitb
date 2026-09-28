@@ -67,7 +67,7 @@ function layerBody(L, uid, href, doc = {}) {
     return `${filter}<image href="${esc(href ? href(L.asset) : L.asset)}" x="${-L.w / 2}" y="${-L.h / 2}" width="${L.w}" height="${L.h}" preserveAspectRatio="xMidYMid slice"${tuned ? ` filter="url(#${fx})"` : ''}/>`;
   }
   if (L.kind === 'shape') {
-    const paint = `fill="${L.shape === 'line' ? 'none' : esc(L.fill)}"${L.stroke ? ` stroke="${esc(L.stroke)}" stroke-width="${L.strokeWidth}"` : (L.shape === 'line' ? ` stroke="${esc(L.fill)}" stroke-width="${Math.max(2, L.strokeWidth)}"` : '')} stroke-linejoin="round"`;
+    const paint = `fill="${L.shape === 'line' || L.noFill ? 'none' : esc(L.fill)}"${L.stroke ? ` stroke="${esc(L.stroke)}" stroke-width="${L.strokeWidth}"` : (L.shape === 'line' ? ` stroke="${esc(L.fill)}" stroke-width="${Math.max(2, L.strokeWidth)}"` : '')} stroke-linejoin="round"`;
     if (!L.frame || L.shape === 'line') return `<g ${paint}>${shapePath(L.shape, L.w, L.h, L.radius, L)}</g>`;
     return frameBody(L, uid, href, doc);
   }
