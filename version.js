@@ -1,2 +1,2 @@
-export const VERSION = '0.2.7';
-export const CODENAME = 'Studio';
+export const VERSION = '0.2.8';
+export const CODENAME = 'Gallery';

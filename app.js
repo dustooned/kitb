@@ -1,11 +1,12 @@
 import * as store from './store.js';
 import {
   emptyKit, normalizeKit, newCategory, newItem, newImageLayer, newTextLayer, newShapeLayer,
-  newFrameLayer, cleanSvgEls, SVG_TAGS, categoryOf, listFor, KINDS, SIZE_PRESETS, MASKS, MASK_LABELS, SHAPES, SHAPE_LABELS, FONTS,
+  newFrameLayer, cleanSvgEls, SVG_TAGS, categoryOf, listFor, itemById, deckById, placeInDeck, fixOrder, KINDS, SIZE_PRESETS, MASKS, MASK_LABELS, SHAPES, SHAPE_LABELS, FONTS,
   MIN_IN, MAX_IN, newId,
 } from './model.js';
 import { itemSVG, toPNG, docSize, esc, layerBox, BLENDS, LAYER_FX, FX_COLOR } from './render.js';
 import { I } from './icons.js';
+import { initGallery, renderGallery } from './gallery.js';
 import { slug, printQueue, packPrintPages, kitWarnings, readme, PRINT_DPI, PAGE_W, PAGE_H } from './project.js';
 import { VERSION, CODENAME } from './version.js';
 
@@ -25,7 +26,7 @@ async function loadPdfjs() {
 }
 
 let kit = emptyKit();
-let ui = { tab: 'card', selId: null, selLayer: null, mview: 'items', tool: 'move', space: false };
+let ui = { screen: 'gallery', tab: 'card', selId: null, selLayer: null, mview: 'canvas', tool: 'move', space: false };
 let saveTimer = null, undoTimer = null, preSnap = null;
 let undoStack = [], redoStack = [];
 
@@ -33,7 +34,6 @@ let undoStack = [], redoStack = [];
 async function load() {
   const saved = await store.get('kit');
   kit = normalizeKit(saved || emptyKit());
-  if (!saved) kit.categories.push(newCategory('General'));
 }
 function scheduleSave() {
   clearTimeout(saveTimer);
@@ -65,7 +65,7 @@ function doRedo() {
   afterHistory();
 }
 function afterHistory() {
-  if (!listFor(kit, ui.tab)?.some(i => i.id === ui.selId)) ui.selId = null;
+  if (!itemById(kit, ui.selId)) { ui.selId = null; if (ui.screen === 'editor') ui.screen = 'gallery'; }
   ui.selLayer = null;
   updateUndoButtons(); scheduleSave(); renderAll();
 }
@@ -81,8 +81,7 @@ function toast(msg) {
 }
 
 // ---------- selection helpers ----------
-function items() { return listFor(kit, ui.tab) || []; }
-function selected() { return items().find(x => x.id === ui.selId) || null; }
+function selected() { return itemById(kit, ui.selId); }
 function selectedLayer() { const it = selected(); return it?.layers.find(l => l.id === ui.selLayer) || null; }
 const clampIn = v => Math.min(MAX_IN, Math.max(MIN_IN, Number.isFinite(v) ? v : 1));
 
@@ -91,24 +90,12 @@ function bindTopbar() {
   $('#kitTitle').value = kit.title;
   $('#kitTitle').addEventListener('focus', () => snap());
   $('#kitTitle').addEventListener('input', e => { kit.title = e.target.value.slice(0, 80) || 'My Game Kit'; scheduleSave(); scheduleUndoCommit(); if ($('#infoTitle')) $('#infoTitle').value = kit.title; });
-  document.querySelectorAll('.tab').forEach(btn => btn.addEventListener('click', () => setTab(btn.dataset.tab)));
-  document.querySelectorAll('.mnav').forEach(btn => btn.addEventListener('click', () => setMobileView(btn.dataset.view)));
+  document.querySelectorAll('.mnav').forEach(btn => btn.addEventListener('click', () => btn.dataset.view === 'gallery' ? setScreen('gallery') : setMobileView(btn.dataset.view)));
+  $('#btnGallery').addEventListener('click', () => setScreen('gallery'));
+  $('#btnInfo').addEventListener('click', () => setScreen('info'));
+  $('#btnInfoBack').addEventListener('click', () => setScreen('gallery'));
   $('#btnUndo').addEventListener('click', doUndo);
   $('#btnRedo').addEventListener('click', doRedo);
-  $('#btnAddCat').addEventListener('click', () => {
-    const pre = JSON.stringify(kit);
-    kit.categories.push(newCategory('New category'));
-    pushUndo(pre); scheduleSave(); renderSidebar();
-  });
-  $('#btnAddItem').addEventListener('click', () => {
-    if (ui.tab === 'info') return;
-    const pre = JSON.stringify(kit);
-    const catId = kit.categories[0]?.id || '';
-    const item = newItem(ui.tab, catId);
-    listFor(kit, ui.tab).push(item);
-    ui.selId = item.id; ui.selLayer = null;
-    pushUndo(pre); scheduleSave(); renderAll(); setMobileView('canvas');
-  });
   $('#btnExport').addEventListener('click', exportZip);
   $('#btnPrint').addEventListener('click', printCards);
   $('#btnTable').addEventListener('click', sendToTable);
@@ -122,7 +109,7 @@ function onKeydown(e) {
   const mod = e.ctrlKey || e.metaKey;
   if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); return; }
   if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); doRedo(); return; }
-  if (typing || !selected()) return;
+  if (typing || ui.screen !== 'editor' || !selected()) return;
   if (mod && (e.key === '=' || e.key === '+')) { e.preventDefault(); return zoomAt(view.z * 1.25); }
   if (mod && e.key === '-') { e.preventDefault(); return zoomAt(view.z * 0.8); }
   if (mod && e.key === '0') { e.preventDefault(); return zoomAt(1); }
@@ -152,13 +139,24 @@ function onKeydown(e) {
 const spaceUp = () => { if (ui.space) { ui.space = false; setTool(ui.tool); } };
 document.addEventListener('keyup', e => { if (e.key === ' ') spaceUp(); });
 window.addEventListener('blur', spaceUp);
-function setTab(tab) {
-  ui.tab = tab; ui.selId = null; ui.selLayer = null;
-  $('#infoPane').hidden = tab !== 'info';
-  $('#layout').hidden = tab === 'info';
-  document.querySelectorAll('.tab').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === tab)));
-  if (tab === 'info') renderInfo(); else renderAll();
-  if (tab !== 'info') setMobileView('items');
+// Three screens, Procreate style: the gallery (home), the editor for one item, and kit info.
+function setScreen(s) {
+  ui.screen = s;
+  document.body.dataset.screen = s;
+  if (s !== 'editor') { ui.selLayer = null; ui.frameContent = null; }
+  window.scrollTo({ top: 0 });
+  renderAll();
+}
+function openItem(id) {
+  const it = itemById(kit, id); if (!it) return;
+  ui.selId = id; ui.tab = it.kind; ui.selLayer = null;
+  setScreen('editor'); setMobileView('canvas');
+}
+function createItem(kind, presetId, deckId) {
+  const pre = JSON.stringify(kit), it = newItem(kind, '', presetId);
+  listFor(kit, kind).push(it); fixOrder(kit);
+  if (deckId && deckById(kit, deckId)) placeInDeck(kit, it.id, deckId);
+  pushUndo(pre); scheduleSave(); openItem(it.id);
 }
 // Mobile shows one panel at a time (bottom nav); a no-op on desktop where CSS keeps all three visible.
 function setMobileView(v) {
@@ -167,63 +165,11 @@ function setMobileView(v) {
   document.querySelectorAll('.mnav').forEach(b => b.setAttribute('aria-current', String(b.dataset.view === v)));
 }
 
-// ---------- categories + item list ----------
-function renderSidebar() {
-  const catList = $('#catList'); catList.innerHTML = '';
-  for (const c of kit.categories) {
-    const li = document.createElement('li');
-    li.className = 'catRow';
-    li.innerHTML = `<input type="color" value="${c.color}" aria-label="Category color">
-      <input type="text" value="${esc(c.name)}" maxlength="40" aria-label="Category name">
-      <button class="iconbtn danger" type="button" title="Delete category">✕</button>`;
-    const [colorEl, nameEl, delEl] = li.children;
-    colorEl.addEventListener('focus', () => snap());
-    colorEl.addEventListener('input', e => { c.color = e.target.value; scheduleSave(); scheduleUndoCommit(); });
-    nameEl.addEventListener('focus', () => snap());
-    nameEl.addEventListener('input', e => { c.name = e.target.value.slice(0, 40) || 'Category'; scheduleSave(); scheduleUndoCommit(); renderItemList(); });
-    delEl.addEventListener('click', () => {
-      if (!confirm(`Delete category "${c.name}"? Cards/pieces/boards using it become uncategorized.`)) return;
-      const pre = JSON.stringify(kit);
-      kit.categories = kit.categories.filter(x => x.id !== c.id);
-      for (const x of [...kit.cards, ...kit.pieces, ...kit.boards]) if (x.category === c.id) x.category = '';
-      pushUndo(pre); scheduleSave(); renderAll();
-    });
-    catList.appendChild(li);
-  }
-  renderItemList();
-}
-function renderItemList() {
-  $('#listLabel').textContent = ui.tab === 'card' ? 'Cards' : ui.tab === 'piece' ? 'Pieces' : 'Boards';
-  const ul = $('#itemList'); ul.innerHTML = '';
-  if (ui.tab === 'info') return;
-  for (const it of items()) {
-    const cat = categoryOf(kit, it.category);
-    const li = document.createElement('li');
-    li.className = 'itemRow' + (it.id === ui.selId ? ' active' : '');
-    li.innerHTML = `<span class="swatch" style="background:${cat?.color || '#9ca3af'}"></span><span class="itemName"></span><button class="iconbtn danger" type="button" title="Delete">✕</button>`;
-    li.querySelector('.itemName').textContent = it.name || 'Untitled';
-    li.addEventListener('click', e => { if (e.target.closest('button')) return; ui.selId = it.id; ui.selLayer = null; renderAll(); setMobileView('canvas'); });
-    li.querySelector('button').addEventListener('click', () => {
-      if (!confirm(`Delete "${it.name}"?`)) return;
-      const pre = JSON.stringify(kit);
-      const list = listFor(kit, it.kind); list.splice(list.indexOf(it), 1);
-      if (ui.selId === it.id) { ui.selId = null; ui.selLayer = null; }
-      pushUndo(pre); scheduleSave(); renderAll();
-    });
-    ul.appendChild(li);
-  }
-}
-
 // ---------- editor: document panel ----------
-function catOptions(sel) {
-  return kit.categories.map(c => `<option value="${c.id}" ${c.id === sel ? 'selected' : ''}>${esc(c.name)}</option>`).join('')
-    || '<option value="">(add a category first)</option>';
-}
 function docPanelHTML(it) {
   const presets = SIZE_PRESETS[it.kind];
   return `
   <label>Name <input id="fName" type="text" maxlength="60" value="${esc(it.name)}"></label>
-  <label>Category <select id="fCat">${catOptions(it.category)}</select></label>
   <label>Size <select id="fPreset">${presets.map(p => `<option value="${p.id}" ${p.id === it.preset ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}</select></label>
   <label>Width (in) <input id="fW" type="number" min="${MIN_IN}" max="${MAX_IN}" step="0.05" value="${it.size.w}"></label>
   <label>Height (in) <input id="fH" type="number" min="${MIN_IN}" max="${MAX_IN}" step="0.05" value="${it.size.h}"></label>
@@ -233,8 +179,7 @@ function docPanelHTML(it) {
 function bindDocPanel(it) {
   const nameEl = $('#fName');
   nameEl.addEventListener('focus', () => snap());
-  nameEl.addEventListener('input', e => { it.name = e.target.value.slice(0, 60) || 'Untitled'; scheduleSave(); scheduleUndoCommit(); renderItemList(); });
-  $('#fCat').addEventListener('change', e => { const pre = JSON.stringify(kit); it.category = e.target.value; pushUndo(pre); scheduleSave(); renderItemList(); });
+  nameEl.addEventListener('input', e => { it.name = e.target.value.slice(0, 60) || 'Untitled'; $('#edName').textContent = it.name; scheduleSave(); scheduleUndoCommit(); });
   $('#fPreset').addEventListener('change', e => {
     const pre = JSON.stringify(kit);
     const p = SIZE_PRESETS[it.kind].find(p => p.id === e.target.value);
@@ -593,6 +538,7 @@ async function cutOut(L) {
 // ---------- editor: top level ----------
 function renderEditor() {
   const it = selected();
+  $('#edName').textContent = it?.name || '';
   $('#emptyState').hidden = !!it;
   $('#editor').hidden = !it;
   $('#layersPanel').hidden = !it;
@@ -955,19 +901,27 @@ function openLayerMenu(e, L) {
   if (L.kind === 'image' && !L.vector) items.push(['imageFrame', 'Convert to frame']);
   if (items.length) items.push(null);
   items.push(['dup', 'Duplicate'], ['front', 'Bring forward'], ['back', 'Send backward'], ['lock', L.locked ? 'Unlock' : 'Lock'], ['hide', L.hidden ? 'Show' : 'Hide'], null, ['del', 'Delete']);
+  showMenu(e, items.map(x => x && x[0] === 'del' ? [...x, true] : x), layerMenuPick);
+}
+/** One right-click / long-press menu for the whole app. items: [key, label, danger?] or null (divider). */
+let menuPick = null;
+function showMenu(e, items, pick) {
+  e.preventDefault?.();
   const m = $('#ctxMenu');
-  m.innerHTML = items.map(x => x ? `<button type="button" role="menuitem" data-cm="${x[0]}"${x[0] === 'del' ? ' class="danger"' : ''}>${x[1]}</button>` : '<hr>').join('');
-  m.hidden = false;
+  m.innerHTML = items.filter((x, i, arr) => x || (i && arr[i - 1] && i < arr.length - 1)).map(x => x ? `<button type="button" role="menuitem" data-cm="${esc(x[0])}"${x[2] ? ' class="danger"' : ''}>${esc(x[1])}</button>` : '<hr>').join('');
+  menuPick = pick; m.hidden = false;
   const r = m.getBoundingClientRect();
-  m.style.left = Math.min(e.clientX, innerWidth - r.width - 8) + 'px';
-  m.style.top = Math.min(e.clientY, innerHeight - r.height - 8) + 'px';
+  m.style.left = Math.max(8, Math.min(e.clientX, innerWidth - r.width - 8)) + 'px';
+  m.style.top = Math.max(8, Math.min(e.clientY, innerHeight - r.height - 8)) + 'px';
   m.querySelector('button')?.focus();
 }
-const closeMenu = () => { $('#ctxMenu').hidden = true; };
+const closeMenu = () => { $('#ctxMenu').hidden = true; menuPick = null; };
 $('#ctxMenu').addEventListener('click', e => {
   const b = e.target.closest('[data-cm]'); if (!b) return;
-  const L = selectedLayer(), it = selected(); closeMenu(); if (!L || !it) return;
-  const a = b.dataset.cm;
+  const pick = menuPick; closeMenu(); pick?.(b.dataset.cm);
+});
+function layerMenuPick(a) {
+  const L = selectedLayer(), it = selected(); if (!L || !it) return;
   if (a === 'dup') return duplicateLayer();
   if (a === 'del') { L.locked = false; return deleteSelectedLayer(); }
   if (a === 'placeFrame') return renderLayerProps(), $('#frameFile')?.click();
@@ -983,7 +937,7 @@ $('#ctxMenu').addEventListener('click', e => {
   pushUndo(pre); scheduleSave(); renderLayers(); renderLayerProps(); updatePreview();
   if (a === 'vectorShape') toast('Now a shape: pick its colour under Fill, or Turn into a picture frame.');
   if (a === 'imageFrame') toast('Now a frame: double-click to move the picture inside, Shift + corner to reshape.');
-});
+}
 $('#previewSvg').addEventListener('contextmenu', e => {
   const g = e.target.closest('[data-layer]'), L = g && selected()?.layers.find(l => l.id === g.dataset.layer);
   if (L) openLayerMenu(e, L);
@@ -992,7 +946,7 @@ $('#layerList').addEventListener('contextmenu', e => {
   const row = e.target.closest('[data-row]'), L = row && selected()?.layers.find(l => l.id === row.dataset.row);
   if (L) openLayerMenu(e, L);
 });
-addEventListener('pointerdown', e => { if (!e.target.closest('#ctxMenu')) closeMenu(); });
+addEventListener('pointerdown', e => { if (!$('#ctxMenu').hidden && !e.target.closest('#ctxMenu')) closeMenu(); });
 addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#ctxMenu').hidden) { e.stopPropagation(); closeMenu(); } }, true);
 addEventListener('blur', closeMenu);
 
@@ -1107,14 +1061,25 @@ async function importFile(file) {
 }
 
 // ---------- top-level render ----------
-function renderAll() { renderSidebar(); renderEditor(); }
+function renderAll() {
+  if (ui.screen === 'gallery') renderGallery();
+  else if (ui.screen === 'info') renderInfo();
+  else if (selected()) renderEditor();
+  else setScreen('gallery');
+}
 
 // ---------- boot ----------
 (async function boot() {
   await load();
   bindTopbar();
   updateUndoButtons();
-  setMobileView('items');
+  initGallery({
+    kit: () => kit,
+    commit(fn, pre = JSON.stringify(kit)) { fn(kit); pushUndo(pre); scheduleSave(); renderGallery(); },
+    open: openItem, create: createItem, toast, menu: showMenu,
+  });
+  document.body.dataset.screen = 'gallery';
+  setMobileView('canvas');
   document.title = `${kit.title} — Kit Forge`;
   console.log(`Kit Forge v${VERSION} "${CODENAME}"`);
   renderAll();

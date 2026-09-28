@@ -12,13 +12,9 @@
 <body>
 <header id="topbar">
   <div id="brand"><img src="icon.svg" width="26" height="26" alt=""><span>Kit Forge</span></div>
-  <input id="kitTitle" type="text" maxlength="80" aria-label="Kit title" placeholder="My Game Kit">
-  <nav id="tabs" role="tablist">
-    <button class="tab" data-tab="card" role="tab" aria-selected="true"><span class="ico">🃏</span><span class="lbl">Cards</span></button>
-    <button class="tab" data-tab="piece" role="tab" aria-selected="false"><span class="ico">🔺</span><span class="lbl">Pieces</span></button>
-    <button class="tab" data-tab="board" role="tab" aria-selected="false"><span class="ico">🗺️</span><span class="lbl">Boards</span></button>
-    <button class="tab" data-tab="info" role="tab" aria-selected="false"><span class="ico">ℹ️</span><span class="lbl">Kit info</span></button>
-  </nav>
+  <input id="kitTitle" type="text" maxlength="80" aria-label="Kit title" placeholder="My Game Kit" data-only="gallery">
+  <button id="btnGallery" class="btn ghost" data-only="editor" title="Back to the gallery" aria-label="Back to the gallery"><span class="ico">‹</span><span class="lbl">Gallery</span></button>
+  <b id="edName" class="ed-name" data-only="editor"></b>
   <div id="topActions">
     <a class="btn ghost icon" href="manual.html" target="_blank" rel="noopener" title="Manual" aria-label="Manual">📖</a>
     <button id="btnUndo" class="btn ghost icon" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>↺</button>
@@ -31,18 +27,22 @@
   </div>
 </header>
 
-<main id="layout">
-  <aside id="sidebar">
-    <div id="catBox">
-      <div class="sideHead"><span>Categories</span><button id="btnAddCat" class="iconbtn" title="Add category">＋</button></div>
-      <ul id="catList"></ul>
-    </div>
-    <div id="listBox">
-      <div class="sideHead"><span id="listLabel">Cards</span><button id="btnAddItem" class="iconbtn" title="Add">＋</button></div>
-      <ul id="itemList"></ul>
-    </div>
-  </aside>
+<main id="gallery" data-only="gallery">
+  <div class="g-head">
+    <div id="gChips" class="g-chips" role="group" aria-label="Show"></div>
+    <span class="spacer"></span>
+    <button id="btnInfo" class="dk-btn" type="button" title="Kit title, class and checks">ⓘ <span>Kit info</span></button>
+    <button id="gSelect" class="dk-btn" type="button" aria-pressed="false">Select</button>
+    <button id="gNew" class="dk-btn accent" type="button">＋ <span>New</span></button>
+  </div>
+  <div id="gGrid" class="g-grid"></div>
+  <p class="g-note g-help">Tap to open · drag onto another to make a deck · drag between to reorder · right-click (or press and hold) for more</p>
+  <div id="gSelbar" class="g-selbar glass" hidden></div>
+</main>
+<div id="deckOverlay" class="deck-overlay" hidden><div id="deckPanel" class="deck-panel glass"><div id="deckHead" class="deck-head"></div><div id="deckGrid" class="g-grid"></div><p id="deckHint" class="g-note"></p></div></div>
+<div id="newSheet" class="new-sheet" hidden></div>
 
+<main id="layout" data-only="editor">
   <section id="editorPane">
     <div id="emptyState" hidden>
       <div class="emptyIcon">🃏</div>
@@ -68,7 +68,8 @@
   </aside>
 </main>
 
-<div id="infoPane" hidden>
+<div id="infoPane" data-only="info">
+  <button id="btnInfoBack" class="dk-btn" type="button">‹ <span>Gallery</span></button>
   <h1>Kit info</h1>
   <label>Title <input id="infoTitle" type="text" maxlength="80"></label>
   <label>Class / section <input id="infoClass" type="text" maxlength="80" placeholder="e.g. DMA 220"></label>
@@ -85,7 +86,7 @@
 </div>
 
 <nav id="mobileNav" aria-label="View">
-  <button class="mnav" data-view="items" aria-current="true"><span class="ico">🗂️</span><span>Items</span></button>
+  <button class="mnav" data-view="gallery"><span class="ico">🗂️</span><span>Gallery</span></button>
   <button class="mnav" data-view="canvas"><span class="ico">🎨</span><span>Canvas</span></button>
   <button class="mnav" data-view="layers"><span class="ico">🧱</span><span>Layers</span></button>
 </nav>

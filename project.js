@@ -35,7 +35,6 @@ export function packPrintPages(items) {
 /** Warnings shown in the UI so students notice missing art/blank layers before exporting. */
 export function kitWarnings(k) {
   const w = [];
-  if (!k.categories.length) w.push('No categories yet — add one to organize your cards, pieces and boards.');
   const check = (list, label) => { for (const it of list) if (!it.layers.some(l => !l.hidden && (l.kind !== 'shape' || l.name !== 'Background'))) w.push(`${label} "${it.name}" is still blank — add some art, text or shapes.`); };
   check(k.cards, 'Card'); check(k.pieces, 'Piece'); check(k.boards, 'Board');
   return w;

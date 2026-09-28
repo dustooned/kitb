@@ -160,7 +160,7 @@ export const newBoard = (categoryId, presetId) => newItem('board', categoryId, p
 export function newCategory(name = 'New category') {
   return { id: newId('cat'), name: str(name, 'Category', 40), color: DEFAULT_COLORS[Math.floor(Math.random() * DEFAULT_COLORS.length)] };
 }
-function cleanCategory(c) { return { id: id(c.id, 'cat'), name: str(c.name, 'Category', 40), color: hex(c.color, DEFAULT_COLORS[0]) }; }
+function cleanCategory(c) { return { id: id(c.id, 'cat'), name: str(c.name, 'Deck', 40), color: hex(c.color, DEFAULT_COLORS[0]), order: (Array.isArray(c.order) ? c.order : []).filter(x => SAFE_ID.test(x)) }; }
 
 export function emptyKit() {
   return { format: 'kit-forge', version: 2, title: 'My Game Kit', className: '', author: '', categories: [], cards: [], pieces: [], boards: [], assets: {} };
@@ -177,6 +177,8 @@ export function normalizeKit(o) {
   k.pieces = (Array.isArray(k.pieces) ? k.pieces : []).filter(Boolean).map(p => cleanItem({ ...p, kind: 'piece' }, catIds));
   k.boards = (Array.isArray(k.boards) ? k.boards : []).filter(Boolean).map(b => cleanItem({ ...b, kind: 'board' }, catIds));
   k.assets = Object.fromEntries(Object.entries(k.assets || {}).filter(([key, v]) => SAFE_ID.test(key) && /^data:image\/(png|jpeg|webp);base64,/.test(v)));
+  k.order = Array.isArray(k.order) ? k.order.map(String) : [];
+  fixOrder(k);
   return k;
 }
 export function listFor(k, kind) { return kind === 'card' ? k.cards : kind === 'piece' ? k.pieces : k.boards; }
@@ -185,4 +187,104 @@ export function categoryOf(k, id) { return k.categories.find(c => c.id === id); 
 export function usedAssets(k) {
   const all = [...k.cards, ...k.pieces, ...k.boards];
   return new Set(all.flatMap(it => it.layers.filter(l => l.kind === 'image').map(l => l.asset)));
+}
+
+// ---------- gallery: decks & order ----------
+// The gallery is iOS-home-screen style. Its top level is kit.order: a list of keys, each either
+// an item id or 'd:<deckId>'. A deck is a stack that can mix cards, pieces and boards; it keeps
+// its own item order in deck.order. (Decks are stored in kit.categories, so saves from before
+// the gallery open unchanged: every old category simply becomes a deck.) An item belongs to at
+// most one deck, recorded in item.category.
+export const allItems = k => [...k.cards, ...k.pieces, ...k.boards];
+export const itemById = (k, id) => allItems(k).find(i => i.id === id) || null;
+export const deckById = (k, id) => k.categories.find(d => d.id === id) || null;
+export const deckItems = (k, d) => d.order.map(id => itemById(k, id)).filter(Boolean);
+
+/** Make kit.order / deck.order consistent with the items: every item appears exactly once. */
+export function fixOrder(k) {
+  const items = allItems(k), byId = new Map(items.map(i => [i.id, i]));
+  for (const it of items) if (it.category && !deckById(k, it.category)) it.category = '';
+  for (const d of k.categories) {
+    const seen = new Set();
+    d.order = d.order.filter(id => byId.get(id)?.category === d.id && !seen.has(id) && seen.add(id));
+    for (const it of items) if (it.category === d.id && !seen.has(it.id)) d.order.push(it.id);
+  }
+  const seen = new Set();
+  k.order = k.order.filter(key => {
+    if (seen.has(key)) return false;
+    const ok = key.startsWith('d:') ? !!deckById(k, key.slice(2)) : byId.has(key) && !byId.get(key).category;
+    return ok && seen.add(key);
+  });
+  for (const d of k.categories) if (!seen.has('d:' + d.id)) k.order.push('d:' + d.id);
+  for (const it of items) if (!it.category && !seen.has(it.id)) k.order.push(it.id);
+  return k;
+}
+/** Take an item out of wherever it is (top level or a deck). */
+export function detach(k, id) {
+  const it = itemById(k, id); if (!it) return null;
+  const d = it.category && deckById(k, it.category);
+  if (d) d.order = d.order.filter(x => x !== id);
+  k.order = k.order.filter(x => x !== id);
+  it.category = '';
+  return it;
+}
+/** Put an item on the top level, before `beforeKey` (or at the end). */
+export function placeTop(k, id, beforeKey = null) {
+  if (!detach(k, id)) return;
+  const i = beforeKey ? k.order.indexOf(beforeKey) : -1;
+  k.order.splice(i < 0 ? k.order.length : i, 0, id);
+}
+/** Put an item into a deck, before `beforeId` (or at the end). */
+export function placeInDeck(k, id, deckId, beforeId = null) {
+  const d = deckById(k, deckId), it = d && detach(k, id); if (!it) return;
+  it.category = deckId;
+  const i = beforeId ? d.order.indexOf(beforeId) : -1;
+  d.order.splice(i < 0 ? d.order.length : i, 0, id);
+}
+/** Make a new deck where the first item sits, holding all the given items (iOS "drop onto"). */
+export function newDeckFrom(k, ids, name = 'New deck') {
+  const d = { ...newCategory(name), order: [] };
+  const first = itemById(k, ids[0]);
+  const at = first && !first.category ? k.order.indexOf(ids[0]) : -1;
+  k.categories.push(d);
+  k.order.splice(at < 0 ? k.order.length : at, 0, 'd:' + d.id);
+  for (const id of ids) placeInDeck(k, id, d.id);
+  return d;
+}
+/** Remove a deck; its items go back to the top level where the deck was. */
+export function ungroupDeck(k, deckId) {
+  const d = deckById(k, deckId); if (!d) return;
+  const at = k.order.indexOf('d:' + deckId);
+  for (const id of [...d.order].reverse()) { const it = itemById(k, id); if (it) { it.category = ''; k.order.splice(at < 0 ? k.order.length : at + 1, 0, id); } }
+  k.order = k.order.filter(x => x !== 'd:' + deckId);
+  k.categories = k.categories.filter(x => x !== d);
+}
+export function dropEmptyDecks(k) {
+  for (const d of [...k.categories]) if (!d.order.length) ungroupDeck(k, d.id);
+}
+export function deleteItems(k, ids) {
+  const gone = new Set(ids);
+  for (const it of allItems(k)) if (gone.has(it.id)) detach(k, it.id);
+  k.cards = k.cards.filter(i => !gone.has(i.id)); k.pieces = k.pieces.filter(i => !gone.has(i.id)); k.boards = k.boards.filter(i => !gone.has(i.id));
+  dropEmptyDecks(k);
+}
+/** Copy an item (new ids for it and its layers) right after the original. */
+export function duplicateItem(k, id) {
+  const it = itemById(k, id); if (!it) return null;
+  const copy = JSON.parse(JSON.stringify(it));
+  copy.id = newId(it.kind[0]); copy.name = (it.name + ' copy').slice(0, 60);
+  for (const L of copy.layers) L.id = newId('L');
+  listFor(k, it.kind).push(copy);
+  const after = arr => { const i = arr.indexOf(id); arr.splice(i < 0 ? arr.length : i + 1, 0, copy.id); };
+  if (it.category) after(deckById(k, it.category).order); else after(k.order);
+  return copy;
+}
+/** Write a reordered *visible subset* back into a longer list, keeping hidden entries in place
+ *  (so reordering while filtered to "Cards" never scrambles pieces and boards). */
+export function reorderSubset(list, subset) {
+  const want = new Set(subset), slots = [];
+  list.forEach((key, i) => { if (want.has(key)) slots.push(i); });
+  const out = [...list];
+  slots.forEach((slot, j) => { out[slot] = subset[j]; });
+  return out;
 }

@@ -1,10 +1,11 @@
 {
   "name": "kit-forge",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "private": true,
   "type": "module",
   "description": "Browser-based board game asset maker for classroom use — layered card/piece/board compositor with PSD/PDF import, no software install.",
   "scripts": {
-    "dev": "node tools/serve.mjs"
+    "dev": "node tools/serve.mjs",
+    "test": "node tools/test-gallery.mjs"
   }
 }
