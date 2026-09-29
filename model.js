@@ -154,9 +154,6 @@ function cleanItem(it, catIds) {
     layers: (Array.isArray(it.layers) ? it.layers : []).slice(0, 60).map(cleanLayer).filter(Boolean),
   };
 }
-export const newCard = (categoryId, presetId) => newItem('card', categoryId, presetId);
-export const newPiece = (categoryId, presetId) => newItem('piece', categoryId, presetId);
-export const newBoard = (categoryId, presetId) => newItem('board', categoryId, presetId);
 
 export function newCategory(name = 'New category') {
   return { id: newId('cat'), name: str(name, 'Category', 40), color: DEFAULT_COLORS[Math.floor(Math.random() * DEFAULT_COLORS.length)] };
@@ -183,12 +180,6 @@ export function normalizeKit(o) {
   return k;
 }
 export function listFor(k, kind) { return kind === 'card' ? k.cards : kind === 'piece' ? k.pieces : k.boards; }
-export function categoryOf(k, id) { return k.categories.find(c => c.id === id); }
-/** Asset data-urls still referenced by any layer, across every item kind. */
-export function usedAssets(k) {
-  const all = [...k.cards, ...k.pieces, ...k.boards];
-  return new Set(all.flatMap(it => it.layers.filter(l => l.kind === 'image').map(l => l.asset)));
-}
 
 // ---------- gallery: decks & order ----------
 // The gallery is iOS-home-screen style. Its top level is kit.order: a list of keys, each either

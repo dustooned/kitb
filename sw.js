@@ -1,6 +1,6 @@
 // Offline support for flaky classroom wifi (network-first, see the fetch handler).
 // Bump CACHE on releases so old cached copies are cleared.
-const CACHE = 'kit-forge-v11';
+const CACHE = 'kit-forge-v12';
 const SHELL = ['./', './index.html', './style.css', './app.js', './model.js', './render.js', './project.js', './store.js', './icons.js', './gallery.js', './version.js', './icon.svg', './manifest.webmanifest', './manual.html'];
 
 self.addEventListener('install', e => {

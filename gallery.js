@@ -367,4 +367,3 @@ export function initGallery(ctx) {
     else if (st.selecting) { st.selecting = false; st.picked.clear(); renderGallery(); }
   });
 }
-export const galleryDeckOpen = () => st.deck;

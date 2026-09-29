@@ -1,7 +1,7 @@
 import * as store from './store.js';
 import {
-  emptyKit, normalizeKit, newCategory, newItem, newImageLayer, newTextLayer, newShapeLayer,
-  newFrameLayer, cleanSvgEls, SVG_TAGS, categoryOf, listFor, itemById, deckById, placeInDeck, fixOrder, KINDS, SIZE_PRESETS, MASKS, MASK_LABELS, SHAPES, SHAPE_LABELS, FONTS,
+  emptyKit, normalizeKit, newItem, newImageLayer, newTextLayer, newShapeLayer,
+  newFrameLayer, cleanSvgEls, SVG_TAGS, listFor, itemById, deckById, placeInDeck, fixOrder, SIZE_PRESETS, MASKS, MASK_LABELS, SHAPES, SHAPE_LABELS, FONTS,
   MIN_IN, MAX_IN, newId,
 } from './model.js';
 import { itemSVG, toPNG, docSize, esc, layerBox, BLENDS, LAYER_FX, FX_COLOR } from './render.js';
@@ -73,11 +73,12 @@ function updateUndoButtons() { $('#btnUndo').disabled = !undoStack.length; $('#b
 
 // ---------- toast ----------
 let toastTimer = null;
-function toast(msg) {
+/** ms = 0 keeps the message up until the next one (export progress uses that). */
+function toast(msg, ms = 2400) {
   const t = $('#toast');
   t.textContent = msg; t.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('show'), 2400);
+  if (ms) toastTimer = setTimeout(() => t.classList.remove('show'), ms);
 }
 
 // ---------- selection helpers ----------
@@ -89,7 +90,7 @@ const clampIn = v => Math.min(MAX_IN, Math.max(MIN_IN, Number.isFinite(v) ? v : 
 function bindTopbar() {
   $('#kitTitle').value = kit.title;
   $('#kitTitle').addEventListener('focus', () => snap());
-  $('#kitTitle').addEventListener('input', e => { kit.title = e.target.value.slice(0, 80) || 'My Game Kit'; scheduleSave(); scheduleUndoCommit(); if ($('#infoTitle')) $('#infoTitle').value = kit.title; });
+  $('#kitTitle').addEventListener('input', e => { kit.title = e.target.value.slice(0, 80) || 'My Game Kit'; document.title = `${kit.title} — Kit Forge`; scheduleSave(); scheduleUndoCommit(); if ($('#infoTitle')) $('#infoTitle').value = kit.title; });
   document.querySelectorAll('.mnav').forEach(btn => btn.addEventListener('click', () => btn.dataset.view === 'gallery' ? setScreen('gallery') : setMobileView(btn.dataset.view)));
   $('#btnGallery').addEventListener('click', () => setScreen('gallery'));
   $('#btnInfo').addEventListener('click', () => setScreen('info'));
@@ -799,7 +800,6 @@ async function cutOut(L) {
 function renderEditor() {
   const it = selected();
   $('#edName').textContent = it?.name || '';
-  $('#emptyState').hidden = !!it;
   $('#editor').hidden = !it;
   $('#layersPanel').hidden = !it;
   if (!it) return;
@@ -1217,7 +1217,7 @@ addEventListener('blur', closeMenu);
 function renderInfo() {
   $('#infoTitle').value = kit.title; $('#infoClass').value = kit.className; $('#infoAuthor').value = kit.author;
   $('#infoTitle').onfocus = () => snap();
-  $('#infoTitle').oninput = e => { kit.title = e.target.value.slice(0, 80) || 'My Game Kit'; $('#kitTitle').value = kit.title; scheduleSave(); scheduleUndoCommit(); };
+  $('#infoTitle').oninput = e => { kit.title = e.target.value.slice(0, 80) || 'My Game Kit'; $('#kitTitle').value = kit.title; document.title = `${kit.title} — Kit Forge`; scheduleSave(); scheduleUndoCommit(); };
   $('#infoClass').onfocus = () => snap();
   $('#infoClass').oninput = e => { kit.className = e.target.value.slice(0, 80); scheduleSave(); scheduleUndoCommit(); };
   $('#infoAuthor').onfocus = () => snap();
@@ -1227,81 +1227,105 @@ function renderInfo() {
 }
 
 // ---------- export ----------
-async function exportZip() {
-  const all = [...kit.cards, ...kit.pieces, ...kit.boards];
-  if (!all.length) return toast('Nothing to export yet — add a card, piece or board first.');
-  toast('Packing ZIP…');
-  let JSZip; try { JSZip = await lib(); } catch { return toast('Could not load the ZIP library — check your internet connection.'); }
-  const zip = new JSZip(), base = slug(kit.title);
-  zip.file('kit.json', JSON.stringify(kit, null, 2));
-  zip.file('README.txt', readme(kit));
-  for (const c of kit.cards) { const { w, h } = docSize(c); zip.file(`cards/${slug(c.name)}-${c.id}.png`, await toPNG(itemSVG(c, 'x'), w, h, 1.5)); }
-  for (const p of kit.pieces) { const { w, h } = docSize(p); zip.file(`pieces/${slug(p.name)}-${p.id}.png`, await toPNG(itemSVG(p, 'x'), w, h, 1.5)); }
-  for (const b of kit.boards) { const { w, h } = docSize(b); zip.file(`boards/${slug(b.name)}-${b.id}.png`, await toPNG(itemSVG(b, 'x'), w, h, 1)); }
-  if (kit.cards.length) await addPrintSheets(zip);
-  // Also bundled here (not just under "Send to Table"), so this ZIP works on the table too —
-  // kit.json is Kit Forge's own project file, not something the table can read.
-  const tablePayload = await buildTablePayload();
-  if (tablePayload) zip.file(`${base}.kittable.json`, JSON.stringify(tablePayload));
-  const blob = await zip.generateAsync({ type: 'blob' });
-  downloadBlob(blob, `${base}.zip`);
-  toast('📦 ZIP downloaded!');
+// Exports can take a while on a big kit, so every export shows a live "3 / 40" counter, the
+// export buttons are locked while one runs (a second click would start a second export), and
+// each item is rendered once per export even when the ZIP needs it twice.
+let exporting = false;
+async function runExport(label, fn) {
+  if (exporting) return toast('Still working on the last export…');
+  exporting = true;
+  const btns = ['#btnExport', '#btnPrint', '#btnTable'].map(s => $(s));
+  btns.forEach(b => b.disabled = true);
+  try { await fn(); }
+  catch (err) { console.error(err); toast(`${label} failed: ${err.message || err}`, 5000); }
+  finally { exporting = false; btns.forEach(b => b.disabled = false); }
 }
-async function addPrintSheets(zip) {
-  const queueCards = printQueue(kit.cards).map(c => ({ ...c, wIn: c.size.w, hIn: c.size.h }));
-  const pages = packPrintPages(queueCards);
+function progress(label, total) {
+  let done = 0;
+  toast(`${label}…`, 0);
+  return () => { done++; toast(`${label} ${Math.min(done, total)} / ${total}…`, 0); };
+}
+function renderer() {
+  const made = new Map();
+  return (it, scale) => {
+    const key = `${it.id}@${scale}`;
+    if (!made.has(key)) { const { w, h } = docSize(it); made.set(key, toPNG(itemSVG(it, 'x'), w, h, scale)); }
+    return made.get(key);
+  };
+}
+const exportScale = it => it.kind === 'board' ? 1 : 1.5;
+const tableScale = () => 1;
+function exportZip() {
+  return runExport('Export', async () => {
+    const all = [...kit.cards, ...kit.pieces, ...kit.boards];
+    if (!all.length) return toast('Nothing to export yet — add a card, piece or board first.');
+    let JSZip; try { JSZip = await lib(); } catch { return toast('Could not load the ZIP library — check your internet connection.', 5000); }
+    const render = renderer(), sheets = kit.cards.length ? packPrintPages(printQueue(kit.cards).map(c => ({ ...c, wIn: c.size.w, hIn: c.size.h }))) : [];
+    const tick = progress('Packing ZIP', all.length * 2 + sheets.length);
+    const zip = new JSZip(), base = slug(kit.title), folder = { card: 'cards', piece: 'pieces', board: 'boards' };
+    zip.file('kit.json', JSON.stringify(kit, null, 2));
+    zip.file('README.txt', readme(kit));
+    for (const it of all) { zip.file(`${folder[it.kind]}/${slug(it.name)}-${it.id}.png`, await render(it, exportScale(it))); tick(); }
+    if (sheets.length) await addPrintSheets(zip, sheets, tick);
+    // Also bundled here (not just under "Send to Table"), so this ZIP works on the table too —
+    // kit.json is Kit Forge's own project file, not something the table can read.
+    const tablePayload = await buildTablePayload(render, tick);
+    if (tablePayload) zip.file(`${base}.kittable.json`, JSON.stringify(tablePayload));
+    toast('Compressing…', 0);
+    downloadBlob(await zip.generateAsync({ type: 'blob' }), `${base}.zip`);
+    toast('📦 ZIP downloaded!');
+  });
+}
+async function addPrintSheets(zip, pages, tick = () => {}) {
   for (let p = 0; p < pages.length; p++) {
     const cv = document.createElement('canvas'); cv.width = PAGE_W; cv.height = PAGE_H;
     const ctx = cv.getContext('2d'); ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, cv.width, cv.height);
     for (const pl of pages[p].placements) {
       const { w: dw, h: dh } = docSize(pl.item);
-      const blob = await toPNG(itemSVG(pl.item, 'p' + p), dw, dh, PRINT_DPI / 200);
-      const bmp = await createImageBitmap(blob);
+      const bmp = await createImageBitmap(await toPNG(itemSVG(pl.item, 'p' + p), dw, dh, PRINT_DPI / 200));
       ctx.drawImage(bmp, pl.x, pl.y, pl.w, pl.h);
       ctx.strokeStyle = '#cccccc'; ctx.strokeRect(pl.x, pl.y, pl.w, pl.h);
     }
-    const blob = await new Promise(res => cv.toBlob(res, 'image/png'));
-    zip.file(`print/sheet-${p + 1}.png`, blob);
+    zip.file(`print/sheet-${p + 1}.png`, await new Promise(res => cv.toBlob(res, 'image/png')));
+    tick();
   }
 }
 function downloadBlob(blob, name) {
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
-async function printCards() {
-  if (!kit.cards.length) return toast('No cards to print yet.');
-  toast('Building print sheet…');
-  let JSZip; try { JSZip = await lib(); } catch { return toast('Could not load the print helper — check your internet connection.'); }
-  const zip = new JSZip();
-  await addPrintSheets(zip);
-  const blob = await zip.generateAsync({ type: 'blob' });
-  downloadBlob(blob, `${slug(kit.title)}-print.zip`);
-  toast('🖨 Print sheets downloaded!');
+function printCards() {
+  return runExport('Print', async () => {
+    if (!kit.cards.length) return toast('No cards to print yet.');
+    let JSZip; try { JSZip = await lib(); } catch { return toast('Could not load the print helper — check your internet connection.', 5000); }
+    const sheets = packPrintPages(printQueue(kit.cards).map(c => ({ ...c, wIn: c.size.w, hIn: c.size.h })));
+    const zip = new JSZip();
+    await addPrintSheets(zip, sheets, progress('Building print sheet', sheets.length));
+    downloadBlob(await zip.generateAsync({ type: 'blob' }), `${slug(kit.title)}-print.zip`);
+    toast('🖨 Print sheets downloaded!');
+  });
 }
-
 function blobToDataUrl(blob) {
   return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(blob); });
 }
-/** Rasterizes every card/piece/board into the .kittable.json shape a Kit Forge Table room loads
- * ("Load kit…") — separate from the print ZIP, but also bundled into it (see exportZip) so
- * whichever file someone downloads, it works on the table. */
-async function buildTablePayload() {
+async function buildTablePayload(render = renderer(), tick = () => {}) {
   const all = [...kit.cards, ...kit.pieces, ...kit.boards];
   if (!all.length) return null;
   const pieces = [];
   for (const it of all) {
-    const { w, h } = docSize(it);
-    const dataUrl = await blobToDataUrl(await toPNG(itemSVG(it, 'x'), w, h, 1));
-    pieces.push({ id: it.id, name: it.name, kind: it.kind, frontImage: dataUrl, w: it.size.w, h: it.size.h, count: it.count });
+    pieces.push({ id: it.id, name: it.name, kind: it.kind, frontImage: await blobToDataUrl(await render(it, tableScale(it))), w: it.size.w, h: it.size.h, count: it.count });
+    tick();
   }
   return { format: 'kit-table', version: 1, kitTitle: kit.title, pieces };
 }
-async function sendToTable() {
-  toast('Preparing table file…');
-  const payload = await buildTablePayload();
-  if (!payload) return toast('Nothing to send yet — add a card, piece or board first.');
-  downloadBlob(new Blob([JSON.stringify(payload)], { type: 'application/json' }), `${slug(kit.title)}.kittable.json`);
-  toast('📤 Table file downloaded — load it in Kit Forge Table.');
+function sendToTable() {
+  return runExport('Send to Table', async () => {
+    const n = kit.cards.length + kit.pieces.length + kit.boards.length;
+    if (!n) return toast('Nothing to send yet — add a card, piece or board first.');
+    const payload = await buildTablePayload(renderer(), progress('Preparing table file', n));
+    downloadBlob(new Blob([JSON.stringify(payload)], { type: 'application/json' }), `${slug(kit.title)}.kittable.json`);
+    toast('📤 Table file downloaded — load it in Kit Forge Table.');
+  });
 }
 
 // ---------- import (kit.json / ZIP save) ----------
